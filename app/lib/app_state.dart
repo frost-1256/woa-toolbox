@@ -43,6 +43,8 @@ class AppState extends ChangeNotifier {
   List<ToolboxDevice> devices = [];
   ToolboxDevice? selected;
   GptTable? primaryTable;
+  GptTable? backupTable;
+  int? totalLbas;
   bool? gptConsistent;
   PartitionLayout? layout;
   MassStorageState? massStorage;
@@ -81,6 +83,8 @@ class AppState extends ChangeNotifier {
       if (match == null) {
         selected = null;
         primaryTable = null;
+        backupTable = null;
+        totalLbas = null;
         gptConsistent = null;
         layout = null;
         massStorage = null;
@@ -88,6 +92,8 @@ class AppState extends ChangeNotifier {
       } else if (match.mode != current.mode) {
         selected = match;
         primaryTable = null;
+        backupTable = null;
+        totalLbas = null;
         gptConsistent = null;
         layout = null;
         massStorage = null;
@@ -149,6 +155,8 @@ class AppState extends ChangeNotifier {
   void select(ToolboxDevice device) {
     selected = device;
     primaryTable = null;
+    backupTable = null;
+    totalLbas = null;
     gptConsistent = null;
     layout = null;
     massStorage = null;
@@ -201,6 +209,8 @@ class AppState extends ChangeNotifier {
       final reader = AdbLbaReader(adb, device.serial, info);
       final both = await GptReader.readBoth(reader);
       primaryTable = both.primary;
+      backupTable = both.backup;
+      totalLbas = info.totalLbas;
       gptConsistent = both.consistent;
       layout = classifyLayout(both.primary);
       logger.info(
@@ -516,6 +526,202 @@ class AppState extends ChangeNotifier {
         onOutput: (line) => logger.info('fastboot: $line'),
       );
       logger.info('ブートイメージを送信しました。端末側で UEFI が起動します。');
+    });
+  }
+
+  // ---- Phase 2: バックアップ / 復元 ----
+
+  BackupManifest? loadedManifest;
+  String? loadedBackupDirPath;
+
+  /// バックアップ/復元の実行条件: Recovery で GPT（両コピー）読み取り済み。
+  bool get canUseBackupOps =>
+      selected?.mode == DeviceMode.recovery &&
+      primaryTable != null &&
+      backupTable != null &&
+      totalLbas != null;
+
+  Future<Directory> _backupsRoot() async {
+    final dir = Directory(
+        '${(await _appDataDir()).path}${Platform.pathSeparator}backups');
+    await dir.create(recursive: true);
+    return dir;
+  }
+
+  String _stamp() {
+    final t = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${t.year}${two(t.month)}${two(t.day)}-'
+        '${two(t.hour)}${two(t.minute)}${two(t.second)}';
+  }
+
+  Future<AdbLbaReader> _readerFor(ToolboxDevice device, AdbClient adb) async {
+    final info = await adb.blockInfo(device.serial);
+    return AdbLbaReader(adb, device.serial, info);
+  }
+
+  Future<String> _productDevice(ToolboxDevice device, AdbClient adb) async {
+    try {
+      return await adb.getProp(device.serial, 'ro.product.device') ??
+          device.product ??
+          '';
+    } catch (_) {
+      return device.product ?? '';
+    }
+  }
+
+  OperationPlan buildBackupGptPlan() => const OperationPlanner().planBackupGpt(
+        serial: selected!.serial,
+        primary: primaryTable!,
+        backup: backupTable!,
+        totalLbas: totalLbas!,
+      );
+
+  OperationPlan buildBackupPartitionsPlan(List<String> names) =>
+      const OperationPlanner().planBackupPartitions(
+        serial: selected!.serial,
+        primary: primaryTable!,
+        names: names,
+      );
+
+  Future<void> executeBackupPlan(OperationPlan plan) async {
+    final device = selected;
+    if (device == null) return;
+    await _guard(() async {
+      final adb = AdbClient(_runner);
+      final reader = await _readerFor(device, adb);
+      final kind = plan.kind == PlanKind.backupGpt ? 'gpt' : 'partitions';
+      final outDir = Directory(
+          '${(await _backupsRoot()).path}${Platform.pathSeparator}${_stamp()}-$kind');
+      logger.info('バックアップを実行します: ${plan.title}');
+      final manifest = await const BackupExecutor().execute(
+        plan,
+        reader: reader,
+        outDir: outDir,
+        serial: device.serial,
+        productDevice: await _productDevice(device, adb),
+        currentFingerprint: primaryTable!.fingerprint,
+        onProgress: (l) => logger.info(l),
+      );
+      logger.info(
+          'バックアップ完了: ${outDir.path}（${manifest.files.length} ファイル）');
+    });
+  }
+
+  Future<void> loadBackupManifest(String manifestPath) async {
+    await _guard(() async {
+      final text = await File(manifestPath).readAsString();
+      loadedManifest = BackupManifest.decode(text);
+      loadedBackupDirPath = File(manifestPath).parent.path;
+      logger.info('バックアップを読み込みました: '
+          'シリアル ${loadedManifest!.deviceSerial} / '
+          '${loadedManifest!.files.length} ファイル');
+    });
+  }
+
+  OperationPlan buildRestoreGptPlan() {
+    final dir = loadedBackupDirPath!;
+    final sector = primaryTable!.sectorSize;
+    final sep = Platform.pathSeparator;
+    final primaryBytes =
+        File('$dir${sep}gpt_primary.bin').readAsBytesSync();
+    final backupBytes = File('$dir${sep}gpt_backup.bin').readAsBytesSync();
+    final rp = GptParser.parsePrimary(primaryBytes, sectorSize: sector);
+    final rb = GptParser.parseBackup(backupBytes,
+        sectorSize: sector, totalLbas: totalLbas!);
+    return const OperationPlanner().planRestoreGpt(
+      serial: selected!.serial,
+      currentPrimary: primaryTable!,
+      restorePrimary: rp,
+      restoreBackup: rb,
+      totalLbas: totalLbas!,
+      restorePath: dir,
+    );
+  }
+
+  Future<void> executeRestoreGptPlan(OperationPlan plan) async {
+    final device = selected;
+    if (device == null) return;
+    await _guard(() async {
+      final adb = AdbClient(_runner);
+      final reader = await _readerFor(device, adb);
+      final dir = plan.data['restorePath'] as String;
+      final sep = Platform.pathSeparator;
+      final primaryRegion =
+          await File('$dir${sep}gpt_primary.bin').readAsBytes();
+      final backupRegion =
+          await File('$dir${sep}gpt_backup.bin').readAsBytes();
+      final rp =
+          GptParser.parsePrimary(primaryRegion, sectorSize: primaryTable!.sectorSize);
+      logger.info('GPT 復元を実行します（書き込み前に現在の GPT を自動保存します）');
+      await RestoreExecutor(adb).executeRestoreGpt(
+        plan,
+        serial: device.serial,
+        reader: reader,
+        primaryRegion: primaryRegion,
+        backupRegion: backupRegion,
+        restorePrimary: rp,
+        workDir: Directory(
+            '${(await _backupsRoot()).path}${Platform.pathSeparator}work'),
+        autoBackup: () async {
+          final pre = const OperationPlanner().planBackupGpt(
+            serial: device.serial,
+            primary: primaryTable!,
+            backup: backupTable!,
+            totalLbas: totalLbas!,
+          );
+          await const BackupExecutor().execute(
+            pre,
+            reader: reader,
+            outDir: Directory(
+                '${(await _backupsRoot()).path}${Platform.pathSeparator}${_stamp()}-pre-restore'),
+            serial: device.serial,
+            productDevice: await _productDevice(device, adb),
+            currentFingerprint: primaryTable!.fingerprint,
+            onProgress: (l) => logger.info(l),
+          );
+        },
+        currentFingerprint: primaryTable!.fingerprint,
+        onProgress: (l) => logger.info(l),
+      );
+      logger.info('GPT 復元が完了しました。再起動して確認してください');
+      primaryTable = null;
+      backupTable = null;
+      totalLbas = null;
+      gptConsistent = null;
+      layout = null;
+    });
+  }
+
+  OperationPlan buildRestorePartitionPlan(BackupFileEntry entry) =>
+      const OperationPlanner().planRestorePartition(
+        serial: selected!.serial,
+        // adb devices -l の product: は ro.product.device と同じ出所。
+        productDevice: selected!.product ?? '',
+        currentPrimary: primaryTable!,
+        manifest: loadedManifest!,
+        entry: entry,
+      );
+
+  Future<void> executeRestorePartitionPlan(
+      OperationPlan plan, BackupFileEntry entry) async {
+    final device = selected;
+    if (device == null) return;
+    await _guard(() async {
+      final adb = AdbClient(_runner);
+      final reader = await _readerFor(device, adb);
+      final file = File(
+          '${loadedBackupDirPath!}${Platform.pathSeparator}${entry.fileName}');
+      logger.info('${entry.partitionName} の書き戻しを実行します');
+      await RestoreExecutor(adb).executeRestorePartition(
+        plan,
+        serial: device.serial,
+        reader: reader,
+        localFile: file,
+        currentFingerprint: primaryTable!.fingerprint,
+        onProgress: (l) => logger.info(l),
+      );
+      logger.info('書き戻しが完了しました');
     });
   }
 

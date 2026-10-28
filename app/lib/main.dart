@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:woa_toolbox_core/woa_toolbox_core.dart';
 
 import 'app_state.dart';
+import 'backups_page.dart';
 import 'uefi_page.dart';
 
 void main() {
@@ -114,6 +115,11 @@ class _HomePageState extends State<HomePage> {
                     label: Text('UEFI'),
                   ),
                   NavigationRailDestination(
+                    icon: Icon(Icons.save_outlined),
+                    selectedIcon: Icon(Icons.save),
+                    label: Text('バックアップ'),
+                  ),
+                  NavigationRailDestination(
                     icon: Icon(Icons.terminal_outlined),
                     selectedIcon: Icon(Icons.terminal),
                     label: Text('ログ'),
@@ -126,6 +132,7 @@ class _HomePageState extends State<HomePage> {
                   0 => DashboardPage(state: state),
                   1 => PartitionsPage(state: state),
                   2 => UefiPage(state: state),
+                  3 => BackupsPage(state: state),
                   _ => LogsPage(state: state),
                 },
               ),
