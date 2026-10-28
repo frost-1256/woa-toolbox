@@ -11,11 +11,23 @@ class UefiImageEntry {
     required this.path,
     required this.sizeBytes,
     required this.modified,
+    required this.fingerprintShort,
+    this.sourceLabel,
+    this.memo = '',
   });
   final String name;
   final String path;
   final int sizeBytes;
   final DateTime modified;
+
+  /// SHA-256 の先頭12桁（ビルドの同一性確認用）。
+  final String fingerprintShort;
+
+  /// 取得元の表示（例: "Actions Run #51 (3fe450a)"）。ローカル取り込みは null。
+  final String? sourceLabel;
+
+  /// ユーザーのメモ（例: 「v3.2 本番」）。
+  final String memo;
 }
 
 /// アプリ全体の状態（Phase 1: 読み取り専用）。
@@ -172,17 +184,54 @@ class AppState extends ChangeNotifier {
     await settings.writeAsString(jsonEncode({'githubToken': githubToken}));
   }
 
+  /// ライブラリのメタデータ（メモ・取得元）: uefi-images/library.json
+  Map<String, Map<String, Object?>> _libraryMeta = {};
+  bool _libraryMetaLoaded = false;
+
+  Future<File> _libraryMetaFile() async => File(
+      '${(await _uefiImagesDir()).path}${Platform.pathSeparator}library.json');
+
+  Future<void> _loadLibraryMeta() async {
+    try {
+      final file = await _libraryMetaFile();
+      if (await file.exists()) {
+        final json =
+            jsonDecode(await file.readAsString()) as Map<String, Object?>;
+        _libraryMeta = {
+          for (final e in json.entries)
+            e.key: (e.value as Map).cast<String, Object?>(),
+        };
+      }
+    } catch (_) {
+      _libraryMeta = {};
+    }
+    _libraryMetaLoaded = true;
+  }
+
+  Future<void> _saveLibraryMeta() async {
+    final file = await _libraryMetaFile();
+    await file.writeAsString(jsonEncode(_libraryMeta));
+  }
+
   Future<void> _refreshUefiImages() async {
+    if (!_libraryMetaLoaded) await _loadLibraryMeta();
     final dir = await _uefiImagesDir();
     final entries = <UefiImageEntry>[];
     await for (final entity in dir.list()) {
       if (entity is File && entity.path.endsWith('.img')) {
         final stat = await entity.stat();
+        final name = entity.uri.pathSegments.last;
+        final bytes = await entity.readAsBytes();
+        final meta = _libraryMeta[name] ?? const {};
         entries.add(UefiImageEntry(
-          name: entity.uri.pathSegments.last,
+          name: name,
           path: entity.path,
           sizeBytes: stat.size,
           modified: stat.modified,
+          fingerprintShort:
+              BootImage.fingerprintHex(bytes).substring(0, 12),
+          sourceLabel: meta['sourceLabel'] as String?,
+          memo: (meta['memo'] as String?) ?? '',
         ));
       }
     }
@@ -192,6 +241,16 @@ class AppState extends ChangeNotifier {
         !entries.any((e) => e.path == selectedUefiImagePath)) {
       selectedUefiImagePath = null;
     }
+  }
+
+  /// イメージにメモを付ける（「v3.2 本番」など）。
+  Future<void> setUefiMemo(String path, String memo) async {
+    final name = path.split(RegExp(r'[\\/]')).last;
+    final meta = _libraryMeta[name] ??= {};
+    meta['memo'] = memo;
+    await _saveLibraryMeta();
+    await _refreshUefiImages();
+    notifyListeners();
   }
 
   void selectUefiImage(String path) {
@@ -240,11 +299,80 @@ class AppState extends ChangeNotifier {
       final name = 'Mu-spacewar-run${result.run.runNumber}.img';
       final target = File('${dir.path}${Platform.pathSeparator}$name');
       await target.writeAsBytes(result.fileBytes);
+      final meta = _libraryMeta[name] ??= {};
+      meta['sourceLabel'] =
+          'Actions Run #${result.run.runNumber} (${result.run.headSha})';
+      await _saveLibraryMeta();
       logger.info(
           'Run #${result.run.runNumber} (${result.run.headSha}) の UEFI を保存しました: $name');
       await _refreshUefiImages();
       selectedUefiImagePath = target.path;
     });
+  }
+
+  // ---- 再起動系 ----
+
+  bool get _selectedIsAdb =>
+      selected != null &&
+      selected!.mode != DeviceMode.fastboot &&
+      selected!.mode != DeviceMode.unauthorized &&
+      selected!.mode != DeviceMode.offline &&
+      selected!.mode != DeviceMode.unknown;
+
+  Future<void> _afterReboot() async {
+    selected = null;
+    primaryTable = null;
+    layout = null;
+    massStorage = null;
+    notifyListeners();
+    await Future<void>.delayed(const Duration(seconds: 6));
+    await refreshDevices();
+  }
+
+  /// ブートローダー (fastboot) へ再起動する。
+  Future<void> rebootToBootloader() async {
+    final device = selected;
+    if (device == null) return;
+    if (device.mode == DeviceMode.fastboot) {
+      await _guard(() async {
+        logger.info('${device.serial} をブートローダーで再起動します');
+        await FastbootClient(_runner).rebootBootloader(device.serial);
+      });
+      return;
+    }
+    if (!_selectedIsAdb) return;
+    await _guard(() async {
+      logger.info('${device.serial} をブートローダーへ再起動します');
+      await AdbClient(_runner).reboot(device.serial, target: 'bootloader');
+      logger.info('再起動しました。fastboot モードで検出されるはずです');
+    });
+    await _afterReboot();
+  }
+
+  /// Recovery へ再起動する（adb モード時）。
+  Future<void> rebootToRecovery() async {
+    final device = selected;
+    if (device == null || !_selectedIsAdb) return;
+    await _guard(() async {
+      logger.info('${device.serial} を Recovery へ再起動します');
+      await AdbClient(_runner).reboot(device.serial, target: 'recovery');
+    });
+    await _afterReboot();
+  }
+
+  /// 通常再起動する。
+  Future<void> rebootSystem() async {
+    final device = selected;
+    if (device == null) return;
+    await _guard(() async {
+      logger.info('${device.serial} を再起動します');
+      if (device.mode == DeviceMode.fastboot) {
+        await FastbootClient(_runner).reboot(device.serial);
+      } else {
+        await AdbClient(_runner).reboot(device.serial);
+      }
+    });
+    await _afterReboot();
   }
 
   bool get canBootUefi =>

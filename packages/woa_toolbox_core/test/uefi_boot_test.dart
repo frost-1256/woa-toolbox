@@ -58,6 +58,23 @@ void main() {
           throwsArgumentError);
       expect(runner.invocations, isEmpty);
     });
+
+    test('フィンガープリントは SHA-256', () {
+      // sha256("abc") の既知値
+      expect(BootImage.fingerprintHex('abc'.codeUnits),
+          'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    });
+
+    test('fastboot の再起動系コマンド', () async {
+      final runner = BootFakeRunner();
+      final client = FastbootClient(runner);
+      await client.reboot('serial1');
+      await client.rebootBootloader('serial1');
+      expect(runner.invocations, [
+        'fastboot -s serial1 reboot',
+        'fastboot -s serial1 reboot-bootloader',
+      ]);
+    });
   });
 
   group('GitHub Actions 純関数', () {

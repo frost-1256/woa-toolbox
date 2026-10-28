@@ -30,6 +30,36 @@ class _UefiPageState extends State<UefiPage> {
   String _size(int bytes) =>
       '${(bytes / 1048576).toStringAsFixed(2)} MiB';
 
+  Future<void> _editMemo(BuildContext context, UefiImageEntry image) async {
+    final controller = TextEditingController(text: image.memo);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${image.name} のメモ'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: '例: v3.2 本番 / v12 ハング',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (result != null) {
+      await widget.state.setUefiMemo(image.path, result.trim());
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
@@ -106,7 +136,18 @@ class _UefiPageState extends State<UefiPage> {
                 ),
                 title: Text(image.name),
                 subtitle: Text(
-                    '${_size(image.sizeBytes)} / ${image.modified.toLocal()}'),
+                  [
+                    image.sourceLabel ?? 'ローカル取り込み',
+                    _size(image.sizeBytes),
+                    'sha256: ${image.fingerprintShort}…',
+                    if (image.memo.isNotEmpty) 'メモ: ${image.memo}',
+                  ].join(' / '),
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.edit_note),
+                  tooltip: 'メモを編集（例: v3.2 本番）',
+                  onPressed: () => _editMemo(context, image),
+                ),
                 selected: state.selectedUefiImagePath == image.path,
                 onTap: () => state.selectUefiImage(image.path),
               ),

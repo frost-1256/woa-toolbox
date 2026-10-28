@@ -227,6 +227,28 @@ class DashboardPage extends StatelessWidget {
                 ],
               ],
             ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: state.busy ? null : state.rebootToBootloader,
+                  icon: const Icon(Icons.settings_backup_restore),
+                  label: const Text('ブートローダーで再起動'),
+                ),
+                if (state.selected!.mode != DeviceMode.fastboot)
+                  OutlinedButton.icon(
+                    onPressed: state.busy ? null : state.rebootToRecovery,
+                    icon: const Icon(Icons.healing),
+                    label: const Text('Recovery で再起動'),
+                  ),
+                OutlinedButton.icon(
+                  onPressed: state.busy ? null : state.rebootSystem,
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text('再起動'),
+                ),
+              ],
+            ),
           ],
         ],
       ),

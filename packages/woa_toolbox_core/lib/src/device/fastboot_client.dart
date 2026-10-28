@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 import 'command_runner.dart';
 
 /// Android ブートイメージの検証（fastboot boot の誤爆防止）。
@@ -17,6 +19,11 @@ class BootImage {
     if (bytes.length > 512 * 1024 * 1024) return 'ファイルが大きすぎます';
     return null;
   }
+
+  /// イメージの同一性を示す SHA-256 フィンガープリント。
+  /// UEFI 本体は圧縮されていて中身から版を読み取れないため、
+  /// 「どのビルドか」の識別はこの指紋と取得元の情報で行う。
+  static String fingerprintHex(List<int> bytes) => sha256.convert(bytes).toString();
 
   static Future<String?> validateFile(String path) async {
     final file = File(path);
@@ -62,5 +69,24 @@ class FastbootClient {
           'fastboot boot が失敗しました: ${result.stderrText.trim()}');
     }
     return result;
+  }
+
+  /// 通常再起動する。
+  Future<void> reboot(String serial) async {
+    final result =
+        await _runner.run(fastbootExecutable, ['-s', serial, 'reboot']);
+    if (!result.ok) {
+      throw StateError('fastboot reboot が失敗しました: ${result.stderrText.trim()}');
+    }
+  }
+
+  /// ブートローダー (fastboot) へ再起動する。
+  Future<void> rebootBootloader(String serial) async {
+    final result = await _runner
+        .run(fastbootExecutable, ['-s', serial, 'reboot-bootloader']);
+    if (!result.ok) {
+      throw StateError(
+          'fastboot reboot-bootloader が失敗しました: ${result.stderrText.trim()}');
+    }
   }
 }

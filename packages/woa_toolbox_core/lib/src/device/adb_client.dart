@@ -109,6 +109,16 @@ class AdbClient {
     return result.stdoutText.trim();
   }
 
+  /// 再起動する。[target] は '' (通常) / 'bootloader' / 'recovery'。
+  Future<void> reboot(String serial, {String target = ''}) async {
+    final args = ['-s', serial, 'reboot'];
+    if (target.isNotEmpty) args.add(target);
+    final result = await _run(args);
+    if (!result.ok) {
+      throw StateError('adb reboot が失敗しました: ${result.stderrText}');
+    }
+  }
+
   Future<String?> getProp(String serial, String prop) async {
     final value = await shellText(serial, ['getprop', prop]);
     return value.isEmpty ? null : value;
