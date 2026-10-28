@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:woa_toolbox_core/woa_toolbox_core.dart';
 
 import 'app_state.dart';
+import 'uefi_page.dart';
 
 void main() {
   runApp(WoaToolboxApp(state: AppState()));
@@ -36,6 +37,12 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.loadUefiLibrary();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +83,11 @@ class _HomePageState extends State<HomePage> {
                     label: Text('パーティション'),
                   ),
                   NavigationRailDestination(
+                    icon: Icon(Icons.rocket_launch_outlined),
+                    selectedIcon: Icon(Icons.rocket_launch),
+                    label: Text('UEFI'),
+                  ),
+                  NavigationRailDestination(
                     icon: Icon(Icons.terminal_outlined),
                     selectedIcon: Icon(Icons.terminal),
                     label: Text('ログ'),
@@ -87,6 +99,7 @@ class _HomePageState extends State<HomePage> {
                 child: switch (_index) {
                   0 => DashboardPage(state: state),
                   1 => PartitionsPage(state: state),
+                  2 => UefiPage(state: state),
                   _ => LogsPage(state: state),
                 },
               ),
