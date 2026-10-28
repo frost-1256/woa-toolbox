@@ -1,0 +1,18 @@
+name: woa_toolbox_mcp
+description: WoA Toolbox の MCP サーバー（stdio）。現在は読み取り専用ツールのみ。
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  woa_toolbox_core:
+    path: ../woa_toolbox_core
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^4.0.0
+
+executables:
+  woa_toolbox_mcp:

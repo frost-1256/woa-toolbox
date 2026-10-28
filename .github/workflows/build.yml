@@ -16,6 +16,12 @@ jobs:
           dart pub get
           dart analyze
           dart test
+      - name: MCP - pub get / analyze / test
+        working-directory: packages/woa_toolbox_mcp
+        run: |
+          dart pub get
+          dart analyze
+          dart test
 
   app-check:
     runs-on: ubuntu-latest

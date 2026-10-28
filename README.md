@@ -10,6 +10,9 @@ Nothing Phone (1)（spacewar / SM7325）の WoA（Windows on ARM）移行・復�
   （adb / fastboot は PATH 前提）、レイアウト判定、バックアップ manifest。
   GUI と MCP サーバーはこのコアだけを操作する。
 - `app/` — Flutter GUI（Material 3、WebView なし、Windows / Linux）。
+- `packages/woa_toolbox_mcp/` — MCP サーバー（stdio、stdout は JSON-RPC 専用）。
+  現在は読み取り専用ツール（`list_devices` / `get_gpt_layout`）のみ。
+  実行: `dart run packages/woa_toolbox_mcp/bin/woa_toolbox_mcp.dart`
 - `.github/workflows/build.yml` — CI: コアのテスト、アプリの analyze/test、
   Windows / Linux ビルド（成果物は Artifacts に上がる）。
 
