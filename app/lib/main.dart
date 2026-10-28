@@ -171,6 +171,12 @@ class DashboardPage extends StatelessWidget {
                 'adb / fastboot は PATH から使います',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              const SizedBox(width: 16),
+              const Text('自動検出'),
+              Switch(
+                value: state.autoDetect,
+                onChanged: state.setAutoDetect,
+              ),
             ],
           ),
           if (state.error != null) ...[
