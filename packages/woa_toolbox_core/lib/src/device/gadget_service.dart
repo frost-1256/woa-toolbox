@@ -66,9 +66,12 @@ class GadgetService {
       ('echo 0x01 > $_gadget/bDeviceProtocol', false),
       ('ln -s $_gadget/functions/mass_storage.0/ $_gadget/configs/b.1/ 2>/dev/null', true),
       ('echo $blockDevice > $_lunFile', false),
-      ('echo 0 > $_gadget/configs/b.1/mass_storage.0/lun.0/cdrom', false),
-      ('echo 0 > $_gadget/configs/b.1/mass_storage.0/lun.0/removable', false),
-      ('echo 0 > $_gadget/configs/b.1/mass_storage.0/lun.0/ro', false),
+      // LUN 属性は LUN が有効化された後だと書けないことがある。
+      // ms_on.sh では失敗しても無言で進んでいた（＝実績のある挙動）ため、
+      // ここも失敗許容にして元のスクリプトの意味論に合わせる。
+      ('echo 0 > $_gadget/configs/b.1/mass_storage.0/lun.0/cdrom', true),
+      ('echo 0 > $_gadget/configs/b.1/mass_storage.0/lun.0/removable', true),
+      ('echo 0 > $_gadget/configs/b.1/mass_storage.0/lun.0/ro', true),
       // UDC の張り直し。成功すると USB が再構成され、この shell 自体が
       // 切れることがあるため失敗許容にし、検証は読み戻しで行う。
       ("sh -c 'echo > $_gadget/UDC; echo $_udcName > $_gadget/UDC'", true),
@@ -77,8 +80,9 @@ class GadgetService {
       onStep?.call(command);
       final result = await _shell(serial, command);
       if (!result.ok && !tolerate) {
+        final stderr = result.stderrText.trim();
         throw StateError(
-            'コマンドが失敗しました: $command (${result.stderrText.trim()})');
+            'コマンドが失敗しました: $command (exit ${result.exitCode}${stderr.isEmpty ? '' : ', $stderr'})');
       }
     }
     // 読み戻し検証（UDC 張り直しで adb が一時的に切れる場合があるため数回試す）。

@@ -8,6 +8,7 @@ import 'package:woa_toolbox_core/woa_toolbox_core.dart';
 class GadgetFakeRunner implements CommandRunner {
   final List<String> commands = [];
   bool failStrictStep = false;
+  bool failRoStep = false;
 
   @override
   Future<CommandResult> run(String executable, List<String> args) async {
@@ -21,6 +22,7 @@ class GadgetFakeRunner implements CommandRunner {
     CommandResult ng() => CommandResult(
         exitCode: 1, stdoutBytes: Uint8List(0), stderrText: 'error');
     if (failStrictStep && command.startsWith('mkdir')) return ng();
+    if (failRoStep && command.contains('lun.0/ro')) return ng();
     if (command.contains('lun.0/file') && command.startsWith('cat')) {
       final enabled =
           commands.any((c) => c.contains('echo /dev/block/sda >'));
@@ -70,6 +72,13 @@ void main() {
         () => service.enableMassStorage('serial1'),
         throwsA(isA<StateError>()),
       );
+    });
+
+    test('LUN 属性 (ro) の書き込み失敗は許容する（ms_on.sh の意味論）', () async {
+      final runner = GadgetFakeRunner()..failRoStep = true;
+      final service = GadgetService(runner);
+      await service.enableMassStorage('serial1');
+      expect(await service.massStorageState('serial1'), MassStorageState.on);
     });
 
     test('状態読み取り: LUN が空なら off、割り当て済みなら on', () async {
