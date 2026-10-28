@@ -1,0 +1,14 @@
+name: woa_toolbox_core
+description: WoA Toolbox の UI 非依存コア（GPT 解析、デバイス検出、操作計画）。
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  crypto: ^3.0.3
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^4.0.0
