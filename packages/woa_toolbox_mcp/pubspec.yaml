@@ -1,5 +1,5 @@
 name: woa_toolbox_mcp
-description: WoA Toolbox の MCP サーバー（stdio）。現在は読み取り専用ツールのみ。
+description: WoA Toolbox の MCP サーバー（stdio）。読み取り系＋計画系ツールを提供し、実行は GUI 承認（IPC）待ち。
 version: 0.1.0
 publish_to: none
 

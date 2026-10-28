@@ -1,6 +1,13 @@
 import '../gpt/gpt_diff.dart';
 
-enum PlanKind { backupGpt, backupPartitions, restoreGpt, restorePartition }
+enum PlanKind {
+  backupGpt,
+  backupPartitions,
+  restoreGpt,
+  restorePartition,
+  fastbootBoot,
+  returnToAndroid,
+}
 
 enum StepKind { readDevice, writeDevice, writeFile, verify }
 
@@ -78,3 +85,29 @@ class OperationPlan {
     }
   }
 }
+
+/// プランの JSON 表現（MCP の plan 系ツールの応答用）。
+Map<String, Object?> planToJson(OperationPlan plan) => {
+      'planId': plan.id,
+      'kind': plan.kind.name,
+      'title': plan.title,
+      'deviceSerial': plan.deviceSerial,
+      'layoutFingerprint': plan.layoutFingerprint,
+      'destructive': plan.destructive,
+      'createdAt': plan.createdAt.toUtc().toIso8601String(),
+      'expiresAt': plan.expiresAt.toUtc().toIso8601String(),
+      'warnings': plan.warnings,
+      if (plan.diff != null)
+        'diff': [
+          for (final c in plan.diff!.changes)
+            {'kind': c.kind.name, 'name': c.name, 'detail': c.detail},
+        ],
+      'steps': [
+        for (final s in plan.steps)
+          {
+            'description': s.description,
+            'command': s.commandPreview,
+            'kind': s.kind.name,
+          },
+      ],
+    };

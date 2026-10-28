@@ -48,12 +48,25 @@ void main() {
     expect((result['serverInfo'] as Map)['name'], 'woa-toolbox');
   });
 
-  test('tools/list は読み取り専用ツールだけを返す', () async {
+  test('tools/list は読み取り系＋計画系ツールを返す', () async {
     final res = await server.handleMessage(
         {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'});
     final tools = (res!['result'] as Map)['tools'] as List;
     final names = tools.map((t) => (t as Map)['name']).toSet();
-    expect(names, {'list_devices', 'get_gpt_layout'});
+    expect(names, {
+      'list_devices',
+      'get_device_status',
+      'get_gpt_layout',
+      'list_partitions',
+      'get_backup_manifest',
+      'get_operation_log',
+      'plan_backup',
+      'plan_restore_gpt',
+      'plan_restore_partition',
+      'plan_return_to_android',
+      'plan_fastboot_boot',
+      'execute_plan',
+    });
   });
 
   test('list_devices がフェイク adb の出力を返す', () async {

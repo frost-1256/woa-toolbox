@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import '../backup/manifest.dart';
+import '../device/fastboot_client.dart';
 import '../gpt/gpt.dart';
 import '../gpt/gpt_diff.dart';
+import '../layout/layout_classifier.dart';
 import 'plan.dart';
 
 /// 操作計画の生成（設計書 §2 / §4.2 / §5.2 / §5.3）。
@@ -209,6 +213,100 @@ class OperationPlanner {
         'totalLbas': totalLbas,
         'entrySectors': entrySectors,
       },
+    );
+  }
+
+  /// fastboot boot の計画。イメージの妥当性（ANDROID! マジック等）を
+  /// 計画時点で検証する。GPT 束縛は無い（fastboot モードでは読めない）。
+  Future<OperationPlan> planFastbootBoot({
+    required String serial,
+    required String imagePath,
+  }) async {
+    final problem = await BootImage.validateFile(imagePath);
+    if (problem != null) {
+      throw ArgumentError('ブートイメージが不正です: $problem');
+    }
+    return OperationPlan(
+      kind: PlanKind.fastbootBoot,
+      title: 'UEFI 起動（fastboot boot）',
+      deviceSerial: serial,
+      layoutFingerprint: '',
+      destructive: false,
+      steps: [
+        const PlanStep(
+          description: 'ブートイメージのマジックとサイズを検証する（検証済み）',
+          commandPreview: 'PC: ANDROID! マジック確認',
+          kind: StepKind.verify,
+        ),
+        PlanStep(
+          description: 'fastboot boot で一時起動する（フラッシュはしない）',
+          commandPreview: 'fastboot -s $serial boot $imagePath',
+          kind: StepKind.writeDevice,
+        ),
+      ],
+      data: {'imagePath': imagePath},
+    );
+  }
+
+  /// 「Android に戻す」ウィザードの計画（設計書 §5.4）。
+  /// ウィザード本体の前提検証と同じ条件を計画時点でチェックする。
+  Future<OperationPlan> planReturnToAndroid({
+    required String serial,
+    required GptTable currentPrimary,
+    required GptTable restorePrimary,
+    required GptTable restoreBackup,
+    required int totalLbas,
+    required String restorePath,
+    required String lineageZipPath,
+  }) async {
+    if (!await File(lineageZipPath).exists()) {
+      throw ArgumentError('LineageOS の zip が見つかりません: $lineageZipPath');
+    }
+    if (classifyLayout(currentPrimary) != PartitionLayout.woa) {
+      throw ArgumentError('現在の GPT が WoA レイアウトではありません');
+    }
+    if (classifyLayout(restorePrimary) == PartitionLayout.woa) {
+      throw ArgumentError('復元先 GPT が WoA レイアウトです');
+    }
+    final gptPlan = planRestoreGpt(
+      serial: serial,
+      currentPrimary: currentPrimary,
+      restorePrimary: restorePrimary,
+      restoreBackup: restoreBackup,
+      totalLbas: totalLbas,
+      restorePath: restorePath,
+    );
+    return OperationPlan(
+      kind: PlanKind.returnToAndroid,
+      title: 'Android（LineageOS）に戻す',
+      deviceSerial: serial,
+      layoutFingerprint: currentPrimary.fingerprint,
+      destructive: true,
+      diff: gptPlan.diff,
+      warnings: [
+        'esp / win は消え、Windows 側のデータは失われます',
+        'userdata は LineageOS の初回起動で初期化される前提です',
+        ...gptPlan.warnings,
+      ],
+      steps: [
+        ...gptPlan.steps,
+        const PlanStep(
+          description: 'Recovery を再起動する',
+          commandPreview: 'adb reboot recovery',
+          kind: StepKind.writeDevice,
+        ),
+        const PlanStep(
+          description: '端末側で「Apply update → Apply from ADB」を選ぶ（手動）',
+          commandPreview: '端末操作: Recovery メニュー',
+          kind: StepKind.verify,
+        ),
+        PlanStep(
+          description: 'LineageOS を sideload する',
+          commandPreview: 'adb -s $serial sideload $lineageZipPath',
+          kind: StepKind.writeDevice,
+        ),
+      ],
+      data: {'restorePath': restorePath, 'lineageZipPath': lineageZipPath},
     );
   }
 

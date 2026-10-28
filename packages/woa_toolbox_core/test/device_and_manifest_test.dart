@@ -1,5 +1,27 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:test/test.dart';
 import 'package:woa_toolbox_core/woa_toolbox_core.dart';
+
+/// fastboot devices が stderr に出る実機挙動を再現するフェイク。
+class _StderrFastbootRunner implements CommandRunner {
+  @override
+  Future<CommandResult> run(String executable, List<String> arguments) async {
+    if (executable == 'adb') {
+      return CommandResult(
+        exitCode: 0,
+        stdoutBytes: Uint8List.fromList(utf8.encode('List of devices attached\n')),
+        stderrText: '',
+      );
+    }
+    return CommandResult(
+      exitCode: 0,
+      stdoutBytes: Uint8List(0),
+      stderrText: 'abcd1234\tfastboot\n',
+    );
+  }
+}
 
 void main() {
   group('adb devices パース', () {
@@ -24,6 +46,13 @@ xyz987	unauthorized
     test('fastboot 行だけ拾う', () {
       const output = 'abcd1234\tfastboot\nnotadevice\n';
       expect(parseFastbootDevices(output), ['abcd1234']);
+    });
+
+    test('実機は stderr に出すため、probe は stderr も見る', () async {
+      final devices = await DeviceProbe(_StderrFastbootRunner()).probe();
+      expect(devices.length, 1);
+      expect(devices.single.serial, 'abcd1234');
+      expect(devices.single.mode, DeviceMode.fastboot);
     });
   });
 

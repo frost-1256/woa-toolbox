@@ -69,7 +69,10 @@ class DeviceProbe {
       final result = await _runner.run(fastbootExecutable, ['devices']);
       if (result.ok) {
         final seen = devices.map((d) => d.serial).toSet();
-        for (final serial in parseFastbootDevices(result.stdoutText)) {
+        // fastboot devices は通常 stderr に出す（ビルドにより stdout の
+        // こともある）ため、両方を対象にパースする。
+        for (final serial in parseFastbootDevices(
+            '${result.stdoutText}\n${result.stderrText}')) {
           if (!seen.contains(serial)) {
             devices.add(ToolboxDevice(serial: serial, mode: DeviceMode.fastboot));
           }
