@@ -109,6 +109,113 @@ class _PlanPreviewDialogState extends State<PlanPreviewDialog> {
   }
 }
 
+/// 旧バックアップ取り込みダイアログ。GPT ダンプ（任意）と
+/// パーティションイメージファイル群を選ぶ。パーティション名は
+/// ファイル名（拡張子なし）から決まる。
+class LegacyImportDialog extends StatefulWidget {
+  const LegacyImportDialog({super.key});
+
+  @override
+  State<LegacyImportDialog> createState() => _LegacyImportDialogState();
+}
+
+class _LegacyImportDialogState extends State<LegacyImportDialog> {
+  String? _gptPath;
+  final Map<String, String> _partitions = {};
+
+  String _stem(String path) {
+    final base = path.split(RegExp(r'[\\/]')).last;
+    final dot = base.lastIndexOf('.');
+    return dot > 0 ? base.substring(0, dot) : base;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('旧バックアップを取り込む'),
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('手作業で取得したバックアップを Toolbox 形式に変換します。'
+                'バックアップ GPT はプライマリから合成されます。'),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final r = await FilePicker.platform.pickFiles();
+                    final p = r?.files.single.path;
+                    if (p != null) setState(() => _gptPath = p);
+                  },
+                  icon: const Icon(Icons.description_outlined),
+                  label: const Text('GPT ダンプを選ぶ'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(_gptPath == null
+                      ? '未選択（任意）'
+                      : _gptPath!.split(RegExp(r'[\\/]')).last),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final r = await FilePicker.platform
+                        .pickFiles(allowMultiple: true);
+                    if (r != null) {
+                      setState(() {
+                        for (final f in r.files) {
+                          if (f.path != null) {
+                            _partitions[_stem(f.path!)] = f.path!;
+                          }
+                        }
+                      });
+                    }
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('パーティションを追加'),
+                ),
+              ],
+            ),
+            for (final e in _partitions.entries)
+              ListTile(
+                dense: true,
+                title: Text(e.key),
+                subtitle: Text(e.value),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () =>
+                      setState(() => _partitions.remove(e.key)),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('キャンセル'),
+        ),
+        FilledButton(
+          onPressed: (_gptPath == null && _partitions.isEmpty)
+              ? null
+              : () => Navigator.pop(
+                    context,
+                    (gptPath: _gptPath, partitions: _partitions),
+                  ),
+          child: const Text('取り込む'),
+        ),
+      ],
+    );
+  }
+}
+
 /// バックアップ / 復元ページ（Phase 2）。
 class BackupsPage extends StatefulWidget {
   const BackupsPage({super.key, required this.state});
@@ -262,6 +369,26 @@ class _BackupsPageState extends State<BackupsPage> {
                       },
                 icon: const Icon(Icons.folder_open_outlined),
                 label: const Text('manifest.json を選ぶ'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: (state.busy || !state.canUseBackupOps)
+                    ? null
+                    : () async {
+                        final result =
+                            await showDialog<({String? gptPath, Map<String, String> partitions})>(
+                          context: context,
+                          builder: (context) => const LegacyImportDialog(),
+                        );
+                        if (result != null) {
+                          await state.importLegacyBackup(
+                            gptDumpPath: result.gptPath,
+                            partitionPaths: result.partitions,
+                          );
+                        }
+                      },
+                icon: const Icon(Icons.input),
+                label: const Text('旧バックアップを取り込む'),
               ),
               const SizedBox(width: 12),
               if (manifest != null)

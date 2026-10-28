@@ -16,6 +16,7 @@ export 'src/github/actions_client.dart';
 export 'src/layout/layout_classifier.dart';
 export 'src/logging/tool_logger.dart';
 export 'src/backup/manifest.dart';
+export 'src/backup/legacy_import.dart';
 export 'src/gpt/gpt_diff.dart';
 export 'src/plan/plan.dart';
 export 'src/plan/planner.dart';

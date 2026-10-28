@@ -619,6 +619,37 @@ class AppState extends ChangeNotifier {
     });
   }
 
+  /// 手作業時代のバックアップ（GPT 単一ダンプ＋生イメージ群）を
+  /// Toolbox 形式に取り込む。取り込み時点で接続中の端末のバックアップ
+  /// として manifest を発行する（元データはこの端末のものという前提）。
+  Future<void> importLegacyBackup({
+    String? gptDumpPath,
+    Map<String, String> partitionPaths = const {},
+  }) async {
+    final device = selected;
+    if (device == null || primaryTable == null || totalLbas == null) return;
+    await _guard(() async {
+      final outDir = Directory(
+          '${(await _backupsRoot()).path}${Platform.pathSeparator}${_stamp()}-legacy-import');
+      final manifest = await LegacyImport.importSet(
+        gptDump:
+            gptDumpPath == null ? null : await File(gptDumpPath).readAsBytes(),
+        partitionFiles: {
+          for (final e in partitionPaths.entries) e.key: File(e.value),
+        },
+        outDir: outDir,
+        deviceSerial: device.serial,
+        productDevice: await _productDevice(device, AdbClient(_runner)),
+        sectorSize: primaryTable!.sectorSize,
+        totalLbas: totalLbas!,
+        sdaPrimary: primaryTable,
+      );
+      loadedManifest = manifest;
+      loadedBackupDirPath = outDir.path;
+      logger.info('旧バックアップを取り込みました: ${outDir.path}');
+    });
+  }
+
   OperationPlan buildRestoreGptPlan() {
     final dir = loadedBackupDirPath!;
     final sector = primaryTable!.sectorSize;
