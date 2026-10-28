@@ -280,6 +280,7 @@ class AppState extends ChangeNotifier {
     await _refreshUefiImages();
     notifyListeners();
     _startAutoDetect();
+    await refreshLastBackup();
   }
 
   Future<void> setGithubToken(String token) async {
@@ -534,6 +535,48 @@ class AppState extends ChangeNotifier {
   BackupManifest? loadedManifest;
   String? loadedBackupDirPath;
 
+  /// ダッシュボード表示用: 最終バックアップの要約。
+  String? lastBackupText;
+
+  Future<void> refreshLastBackup() async {
+    try {
+      final root = Directory(
+          '${(await _appDataDir()).path}${Platform.pathSeparator}backups');
+      if (!await root.exists()) {
+        lastBackupText = null;
+        return;
+      }
+      BackupManifest? newest;
+      await for (final e in root.list()) {
+        if (e is Directory) {
+          final f =
+              File('${e.path}${Platform.pathSeparator}manifest.json');
+          if (await f.exists()) {
+            try {
+              final m = BackupManifest.decode(await f.readAsString());
+              if (newest == null || m.createdAt.isAfter(newest.createdAt)) {
+                newest = m;
+              }
+            } catch (_) {
+              // 壊れた manifest は無視する。
+            }
+          }
+        }
+      }
+      if (newest != null) {
+        final t = newest.createdAt.toLocal();
+        String two(int v) => v.toString().padLeft(2, '0');
+        lastBackupText = '${t.year}-${two(t.month)}-${two(t.day)} '
+            '${two(t.hour)}:${two(t.minute)}（${newest.files.length} ファイル）';
+      } else {
+        lastBackupText = null;
+      }
+      notifyListeners();
+    } catch (_) {
+      lastBackupText = null;
+    }
+  }
+
   /// バックアップ/復元の実行条件: Recovery で GPT（両コピー）読み取り済み。
   bool get canUseBackupOps =>
       selected?.mode == DeviceMode.recovery &&
@@ -605,6 +648,7 @@ class AppState extends ChangeNotifier {
       );
       logger.info(
           'バックアップ完了: ${outDir.path}（${manifest.files.length} ファイル）');
+      await refreshLastBackup();
     });
   }
 

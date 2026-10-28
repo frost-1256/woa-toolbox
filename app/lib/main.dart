@@ -193,6 +193,13 @@ class DashboardPage extends StatelessWidget {
               ),
             ],
           ),
+          if (state.lastBackupText != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              '最終バックアップ: ${state.lastBackupText}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
           if (state.error != null) ...[
             const SizedBox(height: 12),
             Card(
