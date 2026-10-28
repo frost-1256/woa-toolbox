@@ -4,6 +4,7 @@ import 'package:woa_toolbox_core/woa_toolbox_core.dart';
 import 'app_state.dart';
 import 'backups_page.dart';
 import 'uefi_page.dart';
+import 'wizards_page.dart';
 
 void main() {
   runApp(WoaToolboxApp(state: AppState()));
@@ -120,6 +121,11 @@ class _HomePageState extends State<HomePage> {
                     label: Text('バックアップ'),
                   ),
                   NavigationRailDestination(
+                    icon: Icon(Icons.auto_fix_high_outlined),
+                    selectedIcon: Icon(Icons.auto_fix_high),
+                    label: Text('ウィザード'),
+                  ),
+                  NavigationRailDestination(
                     icon: Icon(Icons.terminal_outlined),
                     selectedIcon: Icon(Icons.terminal),
                     label: Text('ログ'),
@@ -133,6 +139,7 @@ class _HomePageState extends State<HomePage> {
                   1 => PartitionsPage(state: state),
                   2 => UefiPage(state: state),
                   3 => BackupsPage(state: state),
+                  4 => WizardsPage(state: state),
                   _ => LogsPage(state: state),
                 },
               ),

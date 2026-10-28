@@ -140,6 +140,16 @@ class AdbClient {
   }
 
   /// exec-out でバイナリをそのまま読む（PTY・改行変換なし）。
+  /// OTA zip を sideload する（端末が sideload モードのとき）。
+  /// 進捗は adb が stderr に出すが、CommandRunner は一括取得のため
+  /// 完了時にまとめて判定する。
+  Future<void> sideload(String serial, String zipPath) async {
+    final result = await _run(['-s', serial, 'sideload', zipPath]);
+    if (!result.ok) {
+      throw StateError('adb sideload が失敗しました: ${result.stderrText}');
+    }
+  }
+
   /// ファイルを端末へ送る（復元の書き込み経路で使う）。
   Future<void> push(String serial, String localPath, String remotePath) async {
     final result = await _run(['-s', serial, 'push', localPath, remotePath]);

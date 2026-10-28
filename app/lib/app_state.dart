@@ -674,53 +674,101 @@ class AppState extends ChangeNotifier {
     final device = selected;
     if (device == null) return;
     await _guard(() async {
-      final adb = AdbClient(_runner);
-      final reader = await _readerFor(device, adb);
-      final dir = plan.data['restorePath'] as String;
-      final sep = Platform.pathSeparator;
-      final primaryRegion =
-          await File('$dir${sep}gpt_primary.bin').readAsBytes();
-      final backupRegion =
-          await File('$dir${sep}gpt_backup.bin').readAsBytes();
-      final rp =
-          GptParser.parsePrimary(primaryRegion, sectorSize: primaryTable!.sectorSize);
-      logger.info('GPT 復元を実行します（書き込み前に現在の GPT を自動保存します）');
-      await RestoreExecutor(adb).executeRestoreGpt(
-        plan,
-        serial: device.serial,
-        reader: reader,
-        primaryRegion: primaryRegion,
-        backupRegion: backupRegion,
-        restorePrimary: rp,
-        workDir: Directory(
-            '${(await _backupsRoot()).path}${Platform.pathSeparator}work'),
-        autoBackup: () async {
-          final pre = const OperationPlanner().planBackupGpt(
-            serial: device.serial,
-            primary: primaryTable!,
-            backup: backupTable!,
-            totalLbas: totalLbas!,
-          );
-          await const BackupExecutor().execute(
-            pre,
-            reader: reader,
-            outDir: Directory(
-                '${(await _backupsRoot()).path}${Platform.pathSeparator}${_stamp()}-pre-restore'),
-            serial: device.serial,
-            productDevice: await _productDevice(device, adb),
-            currentFingerprint: primaryTable!.fingerprint,
-            onProgress: (l) => logger.info(l),
-          );
-        },
-        currentFingerprint: primaryTable!.fingerprint,
-        onProgress: (l) => logger.info(l),
-      );
+      await _executeRestoreGpt(plan, device, (l) => logger.info(l));
       logger.info('GPT 復元が完了しました。再起動して確認してください');
-      primaryTable = null;
-      backupTable = null;
-      totalLbas = null;
-      gptConsistent = null;
-      layout = null;
+    });
+  }
+
+  /// GPT 復元の実処理（ウィザードからも使う）。
+  Future<void> _executeRestoreGpt(
+    OperationPlan plan,
+    ToolboxDevice device,
+    void Function(String line) log,
+  ) async {
+    final adb = AdbClient(_runner);
+    final reader = await _readerFor(device, adb);
+    final dir = plan.data['restorePath'] as String;
+    final sep = Platform.pathSeparator;
+    final primaryRegion =
+        await File('$dir${sep}gpt_primary.bin').readAsBytes();
+    final backupRegion = await File('$dir${sep}gpt_backup.bin').readAsBytes();
+    final rp = GptParser.parsePrimary(primaryRegion,
+        sectorSize: primaryTable!.sectorSize);
+    log('GPT 復元を実行します（書き込み前に現在の GPT を自動保存します）');
+    await RestoreExecutor(adb).executeRestoreGpt(
+      plan,
+      serial: device.serial,
+      reader: reader,
+      primaryRegion: primaryRegion,
+      backupRegion: backupRegion,
+      restorePrimary: rp,
+      workDir: Directory(
+          '${(await _backupsRoot()).path}${Platform.pathSeparator}work'),
+      autoBackup: () async {
+        final pre = const OperationPlanner().planBackupGpt(
+          serial: device.serial,
+          primary: primaryTable!,
+          backup: backupTable!,
+          totalLbas: totalLbas!,
+        );
+        await const BackupExecutor().execute(
+          pre,
+          reader: reader,
+          outDir: Directory(
+              '${(await _backupsRoot()).path}${Platform.pathSeparator}${_stamp()}-pre-restore'),
+          serial: device.serial,
+          productDevice: await _productDevice(device, adb),
+          currentFingerprint: primaryTable!.fingerprint,
+          onProgress: log,
+        );
+      },
+      currentFingerprint: primaryTable!.fingerprint,
+      onProgress: log,
+    );
+    primaryTable = null;
+    backupTable = null;
+    totalLbas = null;
+    gptConsistent = null;
+    layout = null;
+  }
+
+  // ---- ウィザード: Android（LineageOS）に戻す ----
+
+  ReturnStep? wizardStep;
+  String wizardMessage = '';
+
+  Future<void> runReturnToAndroid(String lineageZipPath) async {
+    final device = selected;
+    if (device == null || !canUseBackupOps || loadedBackupDirPath == null) {
+      return;
+    }
+    await _guard(() async {
+      final plan = buildRestoreGptPlan();
+      final sep = Platform.pathSeparator;
+      final rp = GptParser.parsePrimary(
+        await File('${loadedBackupDirPath!}${sep}gpt_primary.bin')
+            .readAsBytes(),
+        sectorSize: primaryTable!.sectorSize,
+      );
+      final currentPrimary = primaryTable!;
+      final wizard = ReturnToAndroidWizard(
+        adb: AdbClient(_runner),
+        probe: () => DeviceProbe(_runner).probe(),
+        restoreGpt: (onProgress) =>
+            _executeRestoreGpt(plan, device, onProgress),
+      );
+      await wizard.run(
+        serial: device.serial,
+        currentPrimary: currentPrimary,
+        restorePrimary: rp,
+        lineageZipPath: lineageZipPath,
+        onStep: (step, message) {
+          wizardStep = step;
+          wizardMessage = message;
+          logger.info('[ウィザード] $message');
+          notifyListeners();
+        },
+      );
     });
   }
 
