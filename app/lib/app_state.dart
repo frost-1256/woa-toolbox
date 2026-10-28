@@ -264,6 +264,20 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// ライブラリからイメージを削除する（ファイルとメタデータ）。
+  Future<void> deleteUefiImage(String path) async {
+    await _guard(() async {
+      final name = path.split(RegExp(r'[\\/]')).last;
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+      _libraryMeta.remove(name);
+      await _saveLibraryMeta();
+      if (selectedUefiImagePath == path) selectedUefiImagePath = null;
+      logger.info('UEFI イメージを削除しました: $name');
+      await _refreshUefiImages();
+    });
+  }
+
   /// イメージにメモを付ける（「v3.2 本番」など）。
   Future<void> setUefiMemo(String path, String memo) async {
     final name = path.split(RegExp(r'[\\/]')).last;

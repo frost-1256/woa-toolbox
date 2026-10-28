@@ -30,6 +30,32 @@ class _UefiPageState extends State<UefiPage> {
   String _size(int bytes) =>
       '${(bytes / 1048576).toStringAsFixed(2)} MiB';
 
+  Future<void> _confirmDelete(
+      BuildContext context, UefiImageEntry image) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('イメージを削除'),
+        content: Text(
+            '${image.name} をライブラリから削除します。\n'
+            'Actions から取得したものは再取得できます。ローカルから取り込んだものは再追加が必要です。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('削除'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await widget.state.deleteUefiImage(image.path);
+    }
+  }
+
   Future<void> _editMemo(BuildContext context, UefiImageEntry image) async {
     final controller = TextEditingController(text: image.memo);
     final result = await showDialog<String>(
@@ -143,10 +169,20 @@ class _UefiPageState extends State<UefiPage> {
                     if (image.memo.isNotEmpty) 'メモ: ${image.memo}',
                   ].join(' / '),
                 ),
-                trailing: IconButton(
-                  icon: const Icon(Icons.edit_note),
-                  tooltip: 'メモを編集（例: v3.2 本番）',
-                  onPressed: () => _editMemo(context, image),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit_note),
+                      tooltip: 'メモを編集（例: v3.2 本番）',
+                      onPressed: () => _editMemo(context, image),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'このイメージを削除',
+                      onPressed: () => _confirmDelete(context, image),
+                    ),
+                  ],
                 ),
                 selected: state.selectedUefiImagePath == image.path,
                 onTap: () => state.selectUefiImage(image.path),
