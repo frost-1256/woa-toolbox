@@ -97,8 +97,15 @@ Nothing Phone (1) (spacewar) の Android ⇄ Windows (WoA) 行き来を、adb/fa
 - 端末構成や対象バージョンで手順が変わり得るため、前提はウィザード定義側に寄せ、検証に落ちたら理由を表示して止める。
 
 ### 5.5 UEFI ブート
-- boot.img をファイルピッカーで選択 → `fastboot boot`（一時ブートのみ）
+- boot.img をファイルピッカーで選択 → `fastboot boot`（一時ブートのみ）（実装済み）
 - イメージの履歴（名前・サイズ・sha256・メモ欄。例: 「v3.2 本番」「v12 ハング」等のタグ付け）
+- **Mu-Silicium の GitHub Actions から最新 UEFI を取得**（実装済み）: spacewar ワークフローの
+  最新成功 run の `uefi-spacewar` 成果物を取得し、`Mu-spacewar-run<N>.img` として
+  アプリデータ内のライブラリに保存する。成果物のダウンロードは公開リポジトリでも
+  GitHub の認証が必須なため、ユーザーが fine-grained PAT（対象リポジトリの Actions
+  読み取り権限）をアプリに設定する方式。トークンはアプリデータ内の settings.json に
+  保存し、ログには出さない。取り込み・取得の双方でブートイメージ形式
+  （ANDROID! マジック）を検証してからライブラリに入れる。
 
 ### 5.6 ログ
 - 実行した全コマンドと出力をセッションごとに保存・閲覧・エクスポート。
