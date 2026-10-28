@@ -804,6 +804,40 @@ class AppState extends ChangeNotifier {
     });
   }
 
+  // ---- ウィザード: Windows インストール ----
+
+  WinInstallStep? winWizardStep;
+  String winWizardMessage = '';
+
+  Future<void> runWindowsInstall({
+    required String winDir,
+    required String espDir,
+    required String wimPath,
+    int imageIndex = 1,
+    String? driverPackDir,
+    String? unattendPath,
+  }) async {
+    await _guard(() async {
+      final wizard = WindowsInstallWizard(
+        runner: _runner,
+        winDir: winDir,
+        espDir: espDir,
+        wimPath: wimPath,
+        imageIndex: imageIndex,
+        driverPackDir: driverPackDir,
+        unattendPath: unattendPath,
+      );
+      await wizard.run(
+        onStep: (step, message) {
+          winWizardStep = step;
+          winWizardMessage = message;
+          logger.info('[Winインストール] $message');
+          notifyListeners();
+        },
+      );
+    });
+  }
+
   Future<void> _guard(Future<void> Function() body) async {
     busy = true;
     error = null;

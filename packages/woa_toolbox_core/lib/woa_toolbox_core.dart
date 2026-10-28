@@ -23,3 +23,4 @@ export 'src/plan/planner.dart';
 export 'src/plan/backup_executor.dart';
 export 'src/plan/restore_executor.dart';
 export 'src/wizard/return_to_android.dart';
+export 'src/wizard/windows_install.dart';
