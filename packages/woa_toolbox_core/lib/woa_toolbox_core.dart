@@ -20,3 +20,4 @@ export 'src/gpt/gpt_diff.dart';
 export 'src/plan/plan.dart';
 export 'src/plan/planner.dart';
 export 'src/plan/backup_executor.dart';
+export 'src/plan/restore_executor.dart';

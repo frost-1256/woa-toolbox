@@ -140,6 +140,14 @@ class AdbClient {
   }
 
   /// exec-out でバイナリをそのまま読む（PTY・改行変換なし）。
+  /// ファイルを端末へ送る（復元の書き込み経路で使う）。
+  Future<void> push(String serial, String localPath, String remotePath) async {
+    final result = await _run(['-s', serial, 'push', localPath, remotePath]);
+    if (!result.ok) {
+      throw StateError('adb push が失敗しました: ${result.stderrText}');
+    }
+  }
+
   Future<Uint8List> execOut(String serial, List<String> command) async {
     final result = await _run(['-s', serial, 'exec-out', ...command]);
     if (!result.ok) {
