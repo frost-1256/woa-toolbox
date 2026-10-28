@@ -231,7 +231,6 @@ class AppState extends ChangeNotifier {
         repo: 'Mu-Silicium',
         workflowFileName: 'spacewar.yml',
         artifactName: 'uefi-spacewar',
-        fileNameInZip: 'boot.img',
       );
       final problem = BootImage.validateBytes(result.fileBytes);
       if (problem != null) {

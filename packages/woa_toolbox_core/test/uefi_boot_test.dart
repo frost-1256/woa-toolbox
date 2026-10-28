@@ -97,6 +97,17 @@ void main() {
           () => extractFileFromZip(Uint8List.fromList(zip), 'missing.img'),
           throwsStateError);
     });
+
+    test('成果物 zip からは Mu-*.img を優先して取り出す', () {
+      final archive = Archive()
+        ..addFile(ArchiveFile(
+            'other.img', 4, Uint8List.fromList('XXXX'.codeUnits)))
+        ..addFile(ArchiveFile('Mu-spacewar.img', 8,
+            Uint8List.fromList('ANDROID!'.codeUnits)));
+      final zip = ZipEncoder().encode(archive)!;
+      final bytes = extractBootImageFromZip(Uint8List.fromList(zip));
+      expect(String.fromCharCodes(bytes), 'ANDROID!');
+    });
   });
 }
 

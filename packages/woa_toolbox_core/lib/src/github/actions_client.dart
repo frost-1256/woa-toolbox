@@ -79,6 +79,25 @@ Uint8List extractFileFromZip(Uint8List zipBytes, String fileName) {
   throw StateError('zip の中に $fileName が見つかりません');
 }
 
+/// 成果物 zip からブートイメージ (.img) を取り出す。
+/// Mu-Silicium の成果物の中身は boot.img ではなく Mu-spacewar.img のような
+/// 名前なので、.img を探して Mu- 始まりを優先する。
+Uint8List extractBootImageFromZip(Uint8List zipBytes) {
+  final archive = ZipDecoder().decodeBytes(zipBytes);
+  final images = archive.files
+      .where((f) => f.isFile && f.name.endsWith('.img'))
+      .toList();
+  if (images.isEmpty) {
+    throw StateError('zip の中に .img ファイルが見つかりません');
+  }
+  images.sort((a, b) {
+    final aMu = a.name.split('/').last.startsWith('Mu-') ? 0 : 1;
+    final bMu = b.name.split('/').last.startsWith('Mu-') ? 0 : 1;
+    return aMu.compareTo(bMu);
+  });
+  return Uint8List.fromList(images.first.content as List<int>);
+}
+
 /// GitHub Actions の成果物を取得するクライアント。
 /// 成果物のダウンロードは公開リポジトリでも認証が必須なため、
 /// 呼び出し側がユーザーのトークン（Actions 読み取り権限）を渡す。
@@ -182,7 +201,6 @@ class GitHubActionsClient {
     required String repo,
     required String workflowFileName,
     required String artifactName,
-    required String fileNameInZip,
   }) async {
     final run = await latestSuccessfulRun(owner, repo, workflowFileName);
     if (run == null) {
@@ -193,7 +211,7 @@ class GitHubActionsClient {
       throw StateError('成果物 $artifactName が見つかりません (run #${run.runNumber})');
     }
     final zip = await downloadArtifactZip(owner, repo, artifact.id);
-    final bytes = extractFileFromZip(zip, fileNameInZip);
+    final bytes = extractBootImageFromZip(zip);
     return (run: run, artifact: artifact, fileBytes: bytes);
   }
 }
