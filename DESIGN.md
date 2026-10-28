@@ -70,6 +70,7 @@ Nothing Phone (1) (spacewar) の Android ⇄ Windows (WoA) 行き来を、adb/fa
 - GPT（プライマリ＋バックアップ領域）
 - 小物パーティション: persist / metadata / frp / modemst1 / modemst2 / fsg（recovery adb の dd で PC へ）
 - 任意: esp / win（大きいので進捗バー＋残り時間表示、既定 OFF）
+- Mass Storage 有効化（Recovery 時）: ms_on.sh の手順をコアの固定テンプレートとして実行し、LUN / UDC を読み戻して検証する（Phase 1 に先行実装済み）
 - **manifest.json の必須項目**（端末固有バックアップの適合検証のため）:
 
   | 項目 | 内容 |

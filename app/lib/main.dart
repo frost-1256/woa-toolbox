@@ -177,6 +177,26 @@ class DashboardPage extends StatelessWidget {
                 const SizedBox(width: 12),
                 if (!state.canReadGpt)
                   const Text('GPT 読み取りは Recovery / Android モードで可能です'),
+                if (state.canUseMassStorage) ...[
+                  const SizedBox(width: 24),
+                  FilledButton.tonalIcon(
+                    onPressed: (state.busy ||
+                            state.massStorage == MassStorageState.on)
+                        ? null
+                        : state.enableMassStorage,
+                    icon: const Icon(Icons.usb),
+                    label: const Text('Mass Storage を有効化'),
+                  ),
+                  const SizedBox(width: 8),
+                  if (state.massStorage != null)
+                    Chip(
+                      label: Text(switch (state.massStorage!) {
+                        MassStorageState.on => 'Mass Storage: ON',
+                        MassStorageState.off => 'Mass Storage: OFF',
+                        MassStorageState.unknown => 'Mass Storage: 不明',
+                      }),
+                    ),
+                ],
                 if (state.layout != null) ...[
                   Chip(
                     label: Text(switch (state.layout!) {

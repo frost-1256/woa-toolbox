@@ -14,6 +14,7 @@ class AppState extends ChangeNotifier {
   GptTable? primaryTable;
   bool? gptConsistent;
   PartitionLayout? layout;
+  MassStorageState? massStorage;
   bool busy = false;
   String? error;
 
@@ -42,8 +43,42 @@ class AppState extends ChangeNotifier {
     primaryTable = null;
     gptConsistent = null;
     layout = null;
+    massStorage = null;
     error = null;
     notifyListeners();
+    if (device.mode == DeviceMode.recovery) {
+      refreshMassStorageState();
+    }
+  }
+
+  bool get canUseMassStorage => selected?.mode == DeviceMode.recovery;
+
+  Future<void> refreshMassStorageState() async {
+    final device = selected;
+    if (device == null || !canUseMassStorage) return;
+    try {
+      massStorage =
+          await GadgetService(_runner).massStorageState(device.serial);
+      notifyListeners();
+    } catch (_) {
+      // 状態が読めない場合は unknown のままにする（致命的でない）。
+    }
+  }
+
+  Future<void> enableMassStorage() async {
+    final device = selected;
+    if (device == null || !canUseMassStorage) return;
+    await _guard(() async {
+      logger.info('${device.serial} で Mass Storage を有効化します');
+      await GadgetService(_runner).enableMassStorage(
+        device.serial,
+        onStep: (step) => logger.command(['adb', 'shell', step]),
+      );
+      massStorage = MassStorageState.on;
+      logger.info(
+          'Mass Storage を有効化しました。PC 側にディスクが見えるはずです。'
+          '戻すときは端末を再起動して Recovery に入り直してください。');
+    });
   }
 
   Future<void> readGpt() async {
