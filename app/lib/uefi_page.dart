@@ -207,13 +207,21 @@ class _UefiPageState extends State<UefiPage> {
               label: const Text('fastboot boot 実行'),
             ),
             const SizedBox(width: 12),
-            if (!state.canBootUefi)
-              const Expanded(
-                child: Text('fastboot モードの端末と、ライブラリで選択したイメージが必要です。'
-                    'フラッシュはしません（一時ブートのみ）。'),
-              ),
+            OutlinedButton.icon(
+              onPressed: (state.busy || !state.canBootFromRecovery)
+                  ? null
+                  : state.bootFromRecovery,
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Recovery から UEFI 起動'),
+            ),
           ],
         ),
+        if (!state.canBootUefi && !state.canBootFromRecovery) ...[
+          const SizedBox(height: 8),
+          const Text('fastboot モードの端末と、ライブラリで選択したイメージが必要です。'
+              'Recovery モードの端末が選択されていれば、再起動から通しで実行できます。'
+              'フラッシュはしません（一時ブートのみ）。'),
+        ],
         if (state.error != null) ...[
           const SizedBox(height: 12),
           Card(

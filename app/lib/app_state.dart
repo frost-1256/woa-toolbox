@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -53,19 +54,96 @@ class AppState extends ChangeNotifier {
     return mode == DeviceMode.recovery || mode == DeviceMode.android;
   }
 
-  Future<void> refreshDevices() async {
-    await _guard(() async {
-      logger.info('端末を検出しています…');
-      devices = await DeviceProbe(_runner).probe();
-      logger.info('${devices.length} 台の端末が見つかりました');
-      if (selected != null &&
-          !devices.any((d) => d.serial == selected!.serial)) {
+  // ---- 端末検出（手動＋自動ポーリング） ----
+
+  bool autoDetect = true;
+  Timer? _autoDetectTimer;
+  String _deviceSignature = '';
+
+  String _signatureOf(List<ToolboxDevice> list) =>
+      list.map((d) => '${d.serial}:${d.mode.name}').join('|');
+
+  /// 検出結果を反映する。選択中端末はシリアルで追いかけ、モードが変わったら
+  /// 旧モードで読んだ状態（GPT 等）を破棄する。何か変わったら true。
+  bool _applyDevices(List<ToolboxDevice> found) {
+    var changed = _signatureOf(found) != _deviceSignature;
+    _deviceSignature = _signatureOf(found);
+    devices = found;
+    final current = selected;
+    if (current != null) {
+      ToolboxDevice? match;
+      for (final d in found) {
+        if (d.serial == current.serial) {
+          match = d;
+          break;
+        }
+      }
+      if (match == null) {
         selected = null;
         primaryTable = null;
         gptConsistent = null;
         layout = null;
+        massStorage = null;
+        changed = true;
+      } else if (match.mode != current.mode) {
+        selected = match;
+        primaryTable = null;
+        gptConsistent = null;
+        layout = null;
+        massStorage = null;
+        changed = true;
+        if (match.mode == DeviceMode.recovery) {
+          refreshMassStorageState();
+        }
+      } else {
+        selected = match;
       }
+    }
+    return changed;
+  }
+
+  Future<void> refreshDevices() async {
+    await _guard(() async {
+      logger.info('端末を検出しています…');
+      final found = await DeviceProbe(_runner).probe();
+      _applyDevices(found);
+      logger.info('${found.length} 台の端末が見つかりました');
     });
+  }
+
+  void _startAutoDetect() {
+    _autoDetectTimer?.cancel();
+    if (!autoDetect) return;
+    _autoDetectTimer =
+        Timer.periodic(const Duration(seconds: 3), (_) => _autoRefresh());
+  }
+
+  Future<void> _autoRefresh() async {
+    if (busy || !autoDetect) return;
+    try {
+      final found = await DeviceProbe(_runner).probe();
+      if (_applyDevices(found)) {
+        logger.info('端末構成が変わりました: '
+            '${found.isEmpty ? 'なし' : found.map((d) => '${d.serial} (${d.mode.name})').join(', ')}');
+        notifyListeners();
+      }
+    } catch (_) {
+      // 自動検出の失敗は静かに無視する（手動検出ではエラーとして表示される）。
+    }
+  }
+
+  Future<void> setAutoDetect(bool enabled) async {
+    autoDetect = enabled;
+    _settings['autoDetect'] = enabled;
+    notifyListeners();
+    _startAutoDetect();
+    await _saveSettings();
+  }
+
+  @override
+  void dispose() {
+    _autoDetectTimer?.cancel();
+    super.dispose();
   }
 
   void select(ToolboxDevice device) {
@@ -179,6 +257,7 @@ class AppState extends ChangeNotifier {
         _settings =
             jsonDecode(await settings.readAsString()) as Map<String, Object?>;
         githubToken = (_settings['githubToken'] as String?) ?? '';
+        autoDetect = (_settings['autoDetect'] as bool?) ?? true;
         themeMode = switch (_settings['themeMode'] as String?) {
           'dark' => ThemeMode.dark,
           'light' => ThemeMode.light,
@@ -190,6 +269,7 @@ class AppState extends ChangeNotifier {
     }
     await _refreshUefiImages();
     notifyListeners();
+    _startAutoDetect();
   }
 
   Future<void> setGithubToken(String token) async {
@@ -401,6 +481,26 @@ class AppState extends ChangeNotifier {
 
   bool get canBootUefi =>
       selected?.mode == DeviceMode.fastboot && selectedUefiImagePath != null;
+
+  bool get canBootFromRecovery =>
+      selected?.mode == DeviceMode.recovery && selectedUefiImagePath != null;
+
+  /// Recovery の端末をブートローダーへ再起動し、そのまま UEFI を一時ブートする。
+  Future<void> bootFromRecovery() async {
+    final device = selected;
+    final imagePath = selectedUefiImagePath;
+    if (device == null || imagePath == null || !canBootFromRecovery) return;
+    await _guard(() async {
+      logger.info('${device.serial} を Recovery から UEFI ブートします: '
+          '${imagePath.split(RegExp(r'[\\/]')).last}');
+      await RecoveryBootChain(_runner).bootFromRecovery(
+        serial: device.serial,
+        imagePath: imagePath,
+        onProgress: (line) => logger.info(line),
+      );
+    });
+    await _afterReboot();
+  }
 
   /// 選択中の fastboot 端末で、選択中のイメージを一時ブートする。
   Future<void> bootSelectedUefi() async {

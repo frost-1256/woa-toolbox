@@ -10,6 +10,7 @@ export 'src/device/command_runner.dart';
 export 'src/device/adb_client.dart';
 export 'src/device/device_probe.dart';
 export 'src/device/fastboot_client.dart';
+export 'src/device/boot_chain.dart';
 export 'src/device/gadget_service.dart';
 export 'src/github/actions_client.dart';
 export 'src/layout/layout_classifier.dart';
