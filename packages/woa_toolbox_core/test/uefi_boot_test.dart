@@ -70,9 +70,11 @@ void main() {
       final client = FastbootClient(runner);
       await client.reboot('serial1');
       await client.rebootBootloader('serial1');
+      await client.rebootRecovery('serial1');
       expect(runner.invocations, [
         'fastboot -s serial1 reboot',
         'fastboot -s serial1 reboot-bootloader',
+        'fastboot -s serial1 reboot recovery',
       ]);
     });
   });

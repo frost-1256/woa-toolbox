@@ -80,6 +80,16 @@ class FastbootClient {
     }
   }
 
+  /// Recovery へ再起動する（fastboot reboot recovery）。
+  Future<void> rebootRecovery(String serial) async {
+    final result = await _runner
+        .run(fastbootExecutable, ['-s', serial, 'reboot', 'recovery']);
+    if (!result.ok) {
+      throw StateError(
+          'fastboot reboot recovery が失敗しました: ${result.stderrText.trim()}');
+    }
+  }
+
   /// ブートローダー (fastboot) へ再起動する。
   Future<void> rebootBootloader(String serial) async {
     final result = await _runner

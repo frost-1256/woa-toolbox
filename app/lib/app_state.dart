@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:woa_toolbox_core/woa_toolbox_core.dart';
 
 /// UEFI イメージライブラリの1件。
@@ -163,13 +164,26 @@ class AppState extends ChangeNotifier {
   Future<File> _settingsFile() async =>
       File('${(await _appDataDir()).path}${Platform.pathSeparator}settings.json');
 
+  Map<String, Object?> _settings = {};
+  ThemeMode themeMode = ThemeMode.system;
+
+  Future<void> _saveSettings() async {
+    final settings = await _settingsFile();
+    await settings.writeAsString(jsonEncode(_settings));
+  }
+
   Future<void> loadUefiLibrary() async {
     try {
       final settings = await _settingsFile();
       if (await settings.exists()) {
-        final json = jsonDecode(await settings.readAsString())
-            as Map<String, Object?>;
-        githubToken = (json['githubToken'] as String?) ?? '';
+        _settings =
+            jsonDecode(await settings.readAsString()) as Map<String, Object?>;
+        githubToken = (_settings['githubToken'] as String?) ?? '';
+        themeMode = switch (_settings['themeMode'] as String?) {
+          'dark' => ThemeMode.dark,
+          'light' => ThemeMode.light,
+          _ => ThemeMode.system,
+        };
       }
     } catch (_) {
       // 設定が壊れていても起動は続ける。
@@ -180,8 +194,15 @@ class AppState extends ChangeNotifier {
 
   Future<void> setGithubToken(String token) async {
     githubToken = token.trim();
-    final settings = await _settingsFile();
-    await settings.writeAsString(jsonEncode({'githubToken': githubToken}));
+    _settings['githubToken'] = githubToken;
+    await _saveSettings();
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    themeMode = mode;
+    _settings['themeMode'] = mode.name;
+    notifyListeners();
+    await _saveSettings();
   }
 
   /// ライブラリのメタデータ（メモ・取得元）: uefi-images/library.json
@@ -333,43 +354,32 @@ class AppState extends ChangeNotifier {
   Future<void> rebootToBootloader() async {
     final device = selected;
     if (device == null) return;
-    if (device.mode == DeviceMode.fastboot) {
-      await _guard(() async {
-        logger.info('${device.serial} をブートローダーで再起動します');
-        await FastbootClient(_runner).rebootBootloader(device.serial);
-      });
-      return;
-    }
-    if (!_selectedIsAdb) return;
     await _guard(() async {
       logger.info('${device.serial} をブートローダーへ再起動します');
-      await AdbClient(_runner).reboot(device.serial, target: 'bootloader');
+      if (device.mode == DeviceMode.fastboot) {
+        await FastbootClient(_runner).rebootBootloader(device.serial);
+      } else if (_selectedIsAdb) {
+        await AdbClient(_runner).reboot(device.serial, target: 'bootloader');
+      } else {
+        throw StateError('このモードでは実行できません');
+      }
       logger.info('再起動しました。fastboot モードで検出されるはずです');
     });
     await _afterReboot();
   }
 
-  /// Recovery へ再起動する（adb モード時）。
+  /// Recovery へ再起動する（Recovery モード自身では出さない）。
   Future<void> rebootToRecovery() async {
     final device = selected;
-    if (device == null || !_selectedIsAdb) return;
+    if (device == null || device.mode == DeviceMode.recovery) return;
     await _guard(() async {
       logger.info('${device.serial} を Recovery へ再起動します');
-      await AdbClient(_runner).reboot(device.serial, target: 'recovery');
-    });
-    await _afterReboot();
-  }
-
-  /// 通常再起動する。
-  Future<void> rebootSystem() async {
-    final device = selected;
-    if (device == null) return;
-    await _guard(() async {
-      logger.info('${device.serial} を再起動します');
       if (device.mode == DeviceMode.fastboot) {
-        await FastbootClient(_runner).reboot(device.serial);
+        await FastbootClient(_runner).rebootRecovery(device.serial);
+      } else if (_selectedIsAdb) {
+        await AdbClient(_runner).reboot(device.serial, target: 'recovery');
       } else {
-        await AdbClient(_runner).reboot(device.serial);
+        throw StateError('このモードでは実行できません');
       }
     });
     await _afterReboot();

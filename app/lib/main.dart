@@ -15,13 +15,24 @@ class WoaToolboxApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'WoA Toolbox',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        useMaterial3: true,
+    return ListenableBuilder(
+      listenable: state,
+      builder: (context, _) => MaterialApp(
+        title: 'WoA Toolbox',
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+          useMaterial3: true,
+        ),
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.teal,
+            brightness: Brightness.dark,
+          ),
+          useMaterial3: true,
+        ),
+        themeMode: state.themeMode,
+        home: HomePage(state: state),
       ),
-      home: HomePage(state: state),
     );
   }
 }
@@ -54,6 +65,21 @@ class _HomePageState extends State<HomePage> {
           appBar: AppBar(
             title: const Text('WoA Toolbox'),
             actions: [
+              IconButton(
+                icon: Icon(
+                  switch (state.themeMode) {
+                    ThemeMode.dark => Icons.light_mode,
+                    ThemeMode.light => Icons.dark_mode,
+                    _ => Icons.brightness_auto,
+                  },
+                ),
+                tooltip: 'テーマ切替（システム/ダーク/ライト）',
+                onPressed: () => state.setThemeMode(switch (state.themeMode) {
+                  ThemeMode.system => ThemeMode.dark,
+                  ThemeMode.dark => ThemeMode.light,
+                  _ => ThemeMode.system,
+                }),
+              ),
               if (state.busy)
                 const Padding(
                   padding: EdgeInsets.all(16),
@@ -236,17 +262,12 @@ class DashboardPage extends StatelessWidget {
                   icon: const Icon(Icons.settings_backup_restore),
                   label: const Text('ブートローダーで再起動'),
                 ),
-                if (state.selected!.mode != DeviceMode.fastboot)
+                if (state.selected!.mode != DeviceMode.recovery)
                   OutlinedButton.icon(
                     onPressed: state.busy ? null : state.rebootToRecovery,
                     icon: const Icon(Icons.healing),
                     label: const Text('Recovery で再起動'),
                   ),
-                OutlinedButton.icon(
-                  onPressed: state.busy ? null : state.rebootSystem,
-                  icon: const Icon(Icons.restart_alt),
-                  label: const Text('再起動'),
-                ),
               ],
             ),
           ],
