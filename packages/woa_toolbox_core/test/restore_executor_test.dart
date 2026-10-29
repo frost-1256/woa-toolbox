@@ -55,6 +55,21 @@ class FakeDeviceRunner implements CommandRunner {
   }
 }
 
+/// dd 書き込みの直後にディスク内容を 1 バイト壊すフェイク
+/// （読み戻し検証で検出できることを確認するため）。
+class CorruptingRunner extends FakeDeviceRunner {
+  CorruptingRunner(super.disk);
+
+  @override
+  Future<CommandResult> run(String executable, List<String> arguments) async {
+    final result = await super.run(executable, arguments);
+    if (arguments.contains('shell') && arguments.contains('dd')) {
+      disk[100 * _sector] ^= 0xFF;
+    }
+    return result;
+  }
+}
+
 const _stockParts = [
   SyntheticPartition('persist', 100, 199),
   SyntheticPartition('super', 200, 999),
@@ -182,6 +197,8 @@ void main() {
       serial: 'S1',
       productDevice: 'spacewar',
       currentFingerprint: both.primary.fingerprint,
+      // 小さいチャンクでストリーミング経路を通す（100 セクタ / 8 = 13 回）。
+      chunkBytes: 8 * _sector,
     );
     image.fillRange(100 * _sector, 200 * _sector, 0x00);
 
@@ -198,9 +215,114 @@ void main() {
       reader: reader,
       localFile: File('${dir.path}${Platform.pathSeparator}persist.bin'),
       currentFingerprint: both.primary.fingerprint,
+      // 割り切れないチャンクで最終チャンクの余りも通す（100 / 3 = 34 回）。
+      chunkBytes: 3 * _sector,
     );
     expect(
         image.sublist(100 * _sector, 200 * _sector).every((b) => b == 0xCD),
         isTrue);
+  });
+
+  test('改ざんされたバックアップファイルは push の前に弾く', () async {
+    final image = buildGptImage(
+        sectorSize: _sector, totalLbas: _total, partitions: _stockParts);
+    image.fillRange(100 * _sector, 200 * _sector, 0xCD);
+    final runner = FakeDeviceRunner(image);
+    final adb = AdbClient(runner);
+    final reader = AdbLbaReader(
+      adb,
+      'S1',
+      const BlockDeviceInfo(
+          logicalSectorSize: _sector,
+          totalBytes: _total * _sector,
+          totalLbas: _total),
+    );
+    final both = await GptReader.readBoth(reader);
+    final dir = await Directory.systemTemp.createTemp('woa_part_restore');
+    addTearDown(() => dir.delete(recursive: true));
+    final backupPlan = planner.planBackupPartitions(
+        serial: 'S1', primary: both.primary, names: ['persist']);
+    final manifest = await const BackupExecutor().execute(
+      backupPlan,
+      reader: reader,
+      outDir: dir,
+      serial: 'S1',
+      productDevice: 'spacewar',
+      currentFingerprint: both.primary.fingerprint,
+    );
+
+    // 同じ長さのまま中身を書き換える（SHA 不一致になる改ざん）。
+    final localFile = File('${dir.path}${Platform.pathSeparator}persist.bin');
+    final tampered = await localFile.readAsBytes();
+    tampered[0] ^= 0xFF;
+    await localFile.writeAsBytes(tampered);
+
+    final restorePlan = planner.planRestorePartition(
+      serial: 'S1',
+      productDevice: 'spacewar',
+      currentPrimary: both.primary,
+      manifest: manifest,
+      entry: manifest.files.single,
+    );
+    await expectLater(
+      RestoreExecutor(adb).executeRestorePartition(
+        restorePlan,
+        serial: 'S1',
+        reader: reader,
+        localFile: localFile,
+        currentFingerprint: both.primary.fingerprint,
+      ),
+      throwsStateError,
+    );
+    // 照合で落ちているので、端末への push は一切走っていない。
+    expect(runner.invocations.any((c) => c.contains('push')), isFalse);
+  });
+
+  test('読み戻し検証は書き込み後の破壊を検出する', () async {
+    final image = buildGptImage(
+        sectorSize: _sector, totalLbas: _total, partitions: _stockParts);
+    image.fillRange(100 * _sector, 200 * _sector, 0xCD);
+    final runner = CorruptingRunner(image);
+    final adb = AdbClient(runner);
+    final reader = AdbLbaReader(
+      adb,
+      'S1',
+      const BlockDeviceInfo(
+          logicalSectorSize: _sector,
+          totalBytes: _total * _sector,
+          totalLbas: _total),
+    );
+    final both = await GptReader.readBoth(reader);
+    final dir = await Directory.systemTemp.createTemp('woa_part_restore');
+    addTearDown(() => dir.delete(recursive: true));
+    final backupPlan = planner.planBackupPartitions(
+        serial: 'S1', primary: both.primary, names: ['persist']);
+    final manifest = await const BackupExecutor().execute(
+      backupPlan,
+      reader: reader,
+      outDir: dir,
+      serial: 'S1',
+      productDevice: 'spacewar',
+      currentFingerprint: both.primary.fingerprint,
+    );
+    image.fillRange(100 * _sector, 200 * _sector, 0x00);
+
+    final restorePlan = planner.planRestorePartition(
+      serial: 'S1',
+      productDevice: 'spacewar',
+      currentPrimary: both.primary,
+      manifest: manifest,
+      entry: manifest.files.single,
+    );
+    await expectLater(
+      RestoreExecutor(adb).executeRestorePartition(
+        restorePlan,
+        serial: 'S1',
+        reader: reader,
+        localFile: File('${dir.path}${Platform.pathSeparator}persist.bin'),
+        currentFingerprint: both.primary.fingerprint,
+      ),
+      throwsStateError,
+    );
   });
 }

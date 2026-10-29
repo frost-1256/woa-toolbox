@@ -1,12 +1,11 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
-
 import '../device/adb_client.dart';
 import '../gpt/gpt.dart';
 import '../gpt/gpt_reader.dart';
 import 'plan.dart';
+import 'streaming.dart';
 
 /// 復元系プランの実行器（設計書 §4.2 / §5.3）。
 ///
@@ -124,6 +123,11 @@ class RestoreExecutor {
   }
 
   /// パーティション書き戻しを実行する（設計書 §5.3）。
+  ///
+  /// ファイル照合と読み戻し検証はチャンク逐次ハッシュ（[hashFileContents] /
+  /// [hashLbaRange]）で、全量をメモリに載せない。書き込み経路
+  /// （ファイル全体を push して 1 回の dd で書く）は従来どおりで、
+  /// 大きなパーティションの書き戻しは端末側 /tmp の制約を受ける。
   Future<void> executeRestorePartition(
     OperationPlan plan, {
     required String serial,
@@ -131,6 +135,7 @@ class RestoreExecutor {
     required File localFile,
     required String currentFingerprint,
     void Function(String line)? onProgress,
+    int chunkBytes = defaultStreamChunkBytes,
   }) async {
     if (plan.kind != PlanKind.restorePartition) {
       throw ArgumentError('restorePartition プラン専用です: ${plan.kind}');
@@ -141,11 +146,23 @@ class RestoreExecutor {
     final sizeLbas = plan.data['sizeLbas'] as int;
     final expectedSha = plan.data['sha256'] as String;
 
-    final bytes = await localFile.readAsBytes();
-    if (bytes.length != sizeLbas * reader.sectorSize) {
+    onProgress?.call('バックアップファイルを照合しています');
+    var verifyPercent = -1;
+    final check = await hashFileContents(
+      localFile,
+      onChunk: (done, total) {
+        // 照合は大きなファイルでは長時間になるため 10% 刻みで進捗を出す。
+        final percent = total == 0 ? 100 : (done * 100) ~/ total;
+        if (percent >= verifyPercent + 10 || percent == 100) {
+          verifyPercent = percent;
+          onProgress?.call('照合中: $percent%');
+        }
+      },
+    );
+    if (check.length != sizeLbas * reader.sectorSize) {
       throw StateError('バックアップファイルのサイズが計画と一致しません');
     }
-    if (sha256.convert(bytes).toString() != expectedSha) {
+    if (check.sha256 != expectedSha) {
       throw StateError('バックアップファイルの SHA-256 が manifest と一致しません');
     }
 
@@ -165,8 +182,21 @@ class RestoreExecutor {
     await _adb.shellText(serial, ['rm', remote]);
     onProgress?.call('書き込み完了。読み戻して検証します');
 
-    final readBack = await reader.readLbas(firstLba, sizeLbas);
-    if (sha256.convert(readBack).toString() != expectedSha) {
+    var lastPercent = -1;
+    final readBackSha = await hashLbaRange(
+      reader,
+      firstLba,
+      sizeLbas,
+      chunkBytes: chunkBytes,
+      onChunk: (done, total) {
+        final percent = total == 0 ? 100 : (done * 100) ~/ total;
+        if (percent >= lastPercent + 25 || percent == 100) {
+          lastPercent = percent;
+          onProgress?.call('読み戻し検証中: $percent%');
+        }
+      },
+    );
+    if (readBackSha != expectedSha) {
       throw StateError('書き込み後の検証に失敗しました: SHA-256 が一致しません');
     }
     onProgress?.call('検証 OK: SHA-256 が一致しました');
