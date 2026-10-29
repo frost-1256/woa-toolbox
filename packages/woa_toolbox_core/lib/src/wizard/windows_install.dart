@@ -120,8 +120,11 @@ class WindowsInstallWizard {
 
     // 2. WIM 検証（ARM64 であること）。
     onStep(WinInstallStep.verifyWim, 'install.wim を検証しています');
-    final info = await _run(
-        'dism', ['/Get-WimInfo', '/WimFile:$wimPath'], 'WIM 情報の取得');
+    // 注意: /Index を付けない概要出力には Architecture 行が含まれない
+    // （実機 DISM で確認済み）。必ずインデックス詳細を取得すること。
+    final info = await _run('dism',
+        ['/Get-WimInfo', '/WimFile:$wimPath', '/Index:$imageIndex'],
+        'WIM 情報の取得');
     if (!info.stdoutText.toUpperCase().contains('ARM64')) {
       throw StateError('この WIM に ARM64 イメージが見つかりません');
     }

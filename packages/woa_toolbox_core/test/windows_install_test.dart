@@ -21,6 +21,15 @@ Name : Windows 11 Pro
 Architecture : ARM64
 ''';
 
+  /// 実機 DISM の概要出力（/Index なし）には Architecture 行が無い。
+  static const _summaryInfo = '''
+Deployment Image Servicing and Management tool
+Index : 1
+Name : Windows 11 Pro
+Description : Windows 11 Pro
+Size : 19,094,946,702 bytes
+''';
+
   CommandResult _ok([String out = 'The operation completed successfully.']) =>
       CommandResult(
           exitCode: 0,
@@ -35,7 +44,10 @@ Architecture : ARM64
     final line = '$executable ${arguments.join(' ')}';
     calls.add(line);
     if (executable == 'dism' && arguments.contains('/Get-WimInfo')) {
-      return _ok(wimInfo);
+      // 実機同様、/Index 指定時のみ Architecture を含む詳細を返す。
+      final detailed =
+          arguments.any((a) => a.startsWith('/Index'));
+      return _ok(detailed ? wimInfo : _summaryInfo);
     }
     if (executable == 'dism' &&
         arguments.any((a) => a.startsWith('/Apply-Image'))) {
