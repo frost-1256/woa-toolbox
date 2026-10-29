@@ -174,6 +174,7 @@ class _WindowsInstallSectionState extends State<_WindowsInstallSection> {
     WinInstallStep.applyImage: 'イメージ展開',
     WinInstallStep.buildBcd: 'BCD 構築',
     WinInstallStep.injectDrivers: 'ドライバー注入',
+    WinInstallStep.offlineFixes: '既知問題の自動修復',
     WinInstallStep.placeUnattend: 'unattend 配置',
     WinInstallStep.verify: '検証',
     WinInstallStep.done: '完了',
@@ -225,8 +226,8 @@ class _WindowsInstallSectionState extends State<_WindowsInstallSection> {
           'esp: $_espDir\n'
           'WIM: $_wimPath（インデックス $index）\n\n'
           '・win ボリュームへ新規展開します（既存 Windows がある場合は中止されます）\n'
-          '・esp の既存 BCD は退避してから新規構築します\n'
-          '・ドライバー注入時は qci2c の Start=4 を自動で再適用します\n\n'
+          '・esp の BCD は退避のうえ bcdboot 方式で新規構築します\n'
+          '・仕上げに既知問題（GeneralizationState / QcTrEE / qci2c）を自動修復します\n\n'
           'アプリを管理者として実行している必要があります。進めますか？',
         ),
         actions: [

@@ -3,6 +3,7 @@ import 'package:woa_toolbox_core/woa_toolbox_core.dart';
 
 import 'app_state.dart';
 import 'backups_page.dart';
+import 'troubleshoot_page.dart';
 import 'uefi_page.dart';
 import 'wizards_page.dart';
 
@@ -68,13 +69,11 @@ class _HomePageState extends State<HomePage> {
             title: const Text('WoA Toolbox'),
             actions: [
               IconButton(
-                icon: Icon(
-                  switch (state.themeMode) {
-                    ThemeMode.dark => Icons.light_mode,
-                    ThemeMode.light => Icons.dark_mode,
-                    _ => Icons.brightness_auto,
-                  },
-                ),
+                icon: Icon(switch (state.themeMode) {
+                  ThemeMode.dark => Icons.light_mode,
+                  ThemeMode.light => Icons.dark_mode,
+                  _ => Icons.brightness_auto,
+                }),
                 tooltip: 'テーマ切替（システム/ダーク/ライト）',
                 onPressed: () => state.setThemeMode(switch (state.themeMode) {
                   ThemeMode.system => ThemeMode.dark,
@@ -126,6 +125,11 @@ class _HomePageState extends State<HomePage> {
                     label: Text('ウィザード'),
                   ),
                   NavigationRailDestination(
+                    icon: Icon(Icons.health_and_safety_outlined),
+                    selectedIcon: Icon(Icons.health_and_safety),
+                    label: Text('トラブルシューティング'),
+                  ),
+                  NavigationRailDestination(
                     icon: Icon(Icons.terminal_outlined),
                     selectedIcon: Icon(Icons.terminal),
                     label: Text('ログ'),
@@ -140,6 +144,7 @@ class _HomePageState extends State<HomePage> {
                   2 => UefiPage(state: state),
                   3 => BackupsPage(state: state),
                   4 => WizardsPage(state: state),
+                  5 => TroubleshootPage(state: state),
                   _ => LogsPage(state: state),
                 },
               ),
@@ -152,14 +157,14 @@ class _HomePageState extends State<HomePage> {
 }
 
 String _modeLabel(DeviceMode mode) => switch (mode) {
-      DeviceMode.android => 'Android',
-      DeviceMode.recovery => 'Recovery',
-      DeviceMode.sideload => 'Sideload',
-      DeviceMode.fastboot => 'Fastboot',
-      DeviceMode.unauthorized => '未認証',
-      DeviceMode.offline => 'オフライン',
-      DeviceMode.unknown => '不明',
-    };
+  DeviceMode.android => 'Android',
+  DeviceMode.recovery => 'Recovery',
+  DeviceMode.sideload => 'Sideload',
+  DeviceMode.fastboot => 'Fastboot',
+  DeviceMode.unauthorized => '未認証',
+  DeviceMode.offline => 'オフライン',
+  DeviceMode.unknown => '不明',
+};
 
 class DashboardPage extends StatelessWidget {
   const DashboardPage({super.key, required this.state});
@@ -181,16 +186,18 @@ class DashboardPage extends StatelessWidget {
                 label: const Text('端末を検出'),
               ),
               const SizedBox(width: 12),
-              Text(
-                'adb / fastboot は PATH から使います',
-                style: Theme.of(context).textTheme.bodySmall,
+              // レール幅（長いナビラベル等）でコンテンツ幅が変わっても
+              // 行が溢れないよう、補足テキスト側を縮められるようにする。
+              Flexible(
+                child: Text(
+                  'adb / fastboot は PATH から使います',
+                  style: Theme.of(context).textTheme.bodySmall,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               const SizedBox(width: 16),
               const Text('自動検出'),
-              Switch(
-                value: state.autoDetect,
-                onChanged: state.setAutoDetect,
-              ),
+              Switch(value: state.autoDetect, onChanged: state.setAutoDetect),
             ],
           ),
           if (state.lastBackupText != null) ...[
@@ -222,7 +229,9 @@ class DashboardPage extends StatelessWidget {
                             leading: const Icon(Icons.smartphone),
                             title: Text(device.serial),
                             subtitle: Text(device.product ?? ''),
-                            trailing: Chip(label: Text(_modeLabel(device.mode))),
+                            trailing: Chip(
+                              label: Text(_modeLabel(device.mode)),
+                            ),
                             selected: state.selected?.serial == device.serial,
                             onTap: () => state.select(device),
                           ),
@@ -235,8 +244,9 @@ class DashboardPage extends StatelessWidget {
             Row(
               children: [
                 FilledButton.tonalIcon(
-                  onPressed:
-                      (state.busy || !state.canReadGpt) ? null : state.readGpt,
+                  onPressed: (state.busy || !state.canReadGpt)
+                      ? null
+                      : state.readGpt,
                   icon: const Icon(Icons.storage),
                   label: const Text('GPT を読み取る'),
                 ),
@@ -246,8 +256,8 @@ class DashboardPage extends StatelessWidget {
                 if (state.canUseMassStorage) ...[
                   const SizedBox(width: 24),
                   FilledButton.tonalIcon(
-                    onPressed: (state.busy ||
-                            state.massStorage == MassStorageState.on)
+                    onPressed:
+                        (state.busy || state.massStorage == MassStorageState.on)
                         ? null
                         : state.enableMassStorage,
                     icon: const Icon(Icons.usb),
@@ -274,8 +284,9 @@ class DashboardPage extends StatelessWidget {
                   const SizedBox(width: 8),
                   if (state.gptConsistent != null)
                     Chip(
-                      label:
-                          Text(state.gptConsistent! ? 'GPT 整合 OK' : 'GPT 不整合'),
+                      label: Text(
+                        state.gptConsistent! ? 'GPT 整合 OK' : 'GPT 不整合',
+                      ),
                     ),
                 ],
               ],
@@ -329,13 +340,15 @@ class PartitionsPage extends StatelessWidget {
         ],
         rows: [
           for (final p in table.partitions)
-            DataRow(cells: [
-              DataCell(Text('${p.index}')),
-              DataCell(Text(p.name)),
-              DataCell(Text('${p.firstLba}')),
-              DataCell(Text('${p.lastLba}')),
-              DataCell(Text(gib(p))),
-            ]),
+            DataRow(
+              cells: [
+                DataCell(Text('${p.index}')),
+                DataCell(Text(p.name)),
+                DataCell(Text('${p.firstLba}')),
+                DataCell(Text('${p.lastLba}')),
+                DataCell(Text(gib(p))),
+              ],
+            ),
         ],
       ),
     );

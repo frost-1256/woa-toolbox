@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../device/command_runner.dart';
+import '../troubleshoot/troubleshooter.dart';
 
 enum WinInstallStep {
   precondition,
@@ -8,6 +9,7 @@ enum WinInstallStep {
   applyImage,
   buildBcd,
   injectDrivers,
+  offlineFixes,
   placeUnattend,
   verify,
   done,
@@ -77,13 +79,11 @@ class WindowsInstallWizard {
     return m != null ? m.group(1)!.toUpperCase() : dir;
   }
 
-  Future<CommandResult> _run(
-      String exe, List<String> args, String what) async {
+  Future<CommandResult> _run(String exe, List<String> args, String what) async {
     final result = await runner.run(exe, args);
     if (!result.ok) {
-      final tail = result.stderrText.isEmpty
-          ? result.stdoutText
-          : result.stderrText;
+      final tail =
+          result.stderrText.isEmpty ? result.stdoutText : result.stderrText;
       throw StateError('$what が失敗しました: $tail');
     }
     return result;
@@ -95,8 +95,7 @@ class WindowsInstallWizard {
     // 1. 前提検証。
     onStep(WinInstallStep.precondition, '前提を検証しています');
     if (!hostIsWindows) {
-      throw StateError(
-          'Windows インストールウィザードは Windows 上でのみ動作します（DISM 依存）');
+      throw StateError('Windows インストールウィザードは Windows 上でのみ動作します（DISM 依存）');
     }
     if (!await Directory(winDir).exists()) {
       throw StateError('win ボリュームが見つかりません: $winDir');
@@ -110,8 +109,7 @@ class WindowsInstallWizard {
     if (!await File(wimPath).exists()) {
       throw StateError('install.wim が見つかりません: $wimPath');
     }
-    if (driverPackDir != null &&
-        !await Directory(driverPackDir!).exists()) {
+    if (driverPackDir != null && !await Directory(driverPackDir!).exists()) {
       throw StateError('ドライバーパックが見つかりません: $driverPackDir');
     }
     if (unattendPath != null && !await File(unattendPath!).exists()) {
@@ -122,7 +120,8 @@ class WindowsInstallWizard {
     onStep(WinInstallStep.verifyWim, 'install.wim を検証しています');
     // 注意: /Index を付けない概要出力には Architecture 行が含まれない
     // （実機 DISM で確認済み）。必ずインデックス詳細を取得すること。
-    final info = await _run('dism',
+    final info = await _run(
+        'dism',
         ['/Get-WimInfo', '/WimFile:$wimPath', '/Index:$imageIndex'],
         'WIM 情報の取得');
     if (!info.stdoutText.toUpperCase().contains('ARM64')) {
@@ -148,73 +147,85 @@ class WindowsInstallWizard {
       'イメージの展開',
     );
 
-    // 4. ブート構成（BCD 新規構築＋手作業版 make_bcd.bat と同じ設定）。
+    // 4. ブート構成（bcdboot 方式。DESIGN §12-2）。
+    // bcdedit /createstore 製のストアは Sysprep の spbcd が
+    // 「system store ではない」と拒否するため使わない。
     onStep(WinInstallStep.buildBcd, 'BCD を構築しています');
     final bootmgfw =
         File(_join(_winRoot, ['Windows', 'Boot', 'EFI', 'bootmgfw.efi']));
     if (!await bootmgfw.exists()) {
       throw StateError('展開したイメージに bootmgfw.efi がありません');
     }
-    final msBootDir =
-        Directory(_join(_espRoot, ['EFI', 'Microsoft', 'Boot']));
-    await msBootDir.create(recursive: true);
-    final bootDir = Directory(_join(_espRoot, ['EFI', 'Boot']));
-    await bootDir.create(recursive: true);
-    await bootmgfw.copy(_join(msBootDir.path, ['bootmgfw.efi']));
-    await bootmgfw.copy(_join(bootDir.path, ['bootaa64.efi']));
-
-    final store = _join(msBootDir.path, ['BCD']);
-    if (await File(store).exists()) {
-      final backup = '$store.bak-${DateTime.now().millisecondsSinceEpoch}';
-      await File(store).rename(backup);
-      onStep(WinInstallStep.buildBcd, '既存の BCD を $backup に退避しました');
-    }
-    await _run('bcdedit', ['/createstore', store], 'BCD ストアの作成');
     final espPart = _partitionOf(espPartition, espDir);
     final winPart = _partitionOf(winPartition, winDir);
-    await _run(
-        'bcdedit',
-        ['/store', store, '/create', '{bootmgr}', '/d', 'Windows Boot Manager'],
-        'bootmgr の作成');
-    await _run(
-        'bcdedit',
-        ['/store', store, '/set', '{bootmgr}', 'device', 'partition=$espPart'],
-        'bootmgr の設定');
-    final created = await _run(
-        'bcdedit',
-        ['/store', store, '/create', '/d', 'Windows 11', '/application', 'osloader'],
-        'OS ローダーの作成');
-    final guid = RegExp(r'\{[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}')
-        .firstMatch(created.stdoutText)
-        ?.group(0);
-    if (guid == null) {
-      throw StateError('OS ローダーの GUID を取得できませんでした: ${created.stdoutText}');
+    final msBootDir = Directory(_join(_espRoot, ['EFI', 'Microsoft', 'Boot']));
+    final bootDir = Directory(_join(_espRoot, ['EFI', 'Boot']));
+    final store = _join(msBootDir.path, ['BCD']);
+    String? storeBackup;
+    if (await File(store).exists()) {
+      storeBackup = '$store.bak-${DateTime.now().millisecondsSinceEpoch}';
+      await File(store).rename(storeBackup);
+      onStep(WinInstallStep.buildBcd, '既存の BCD を $storeBackup に退避しました');
     }
-    Future<void> setLoader(String name, String value) => _run(
-          'bcdedit',
-          ['/store', store, '/set', guid, name, value],
-          'ローダー設定 ($name)',
-        );
-    await setLoader('device', 'partition=$winPart');
-    await setLoader('osdevice', 'partition=$winPart');
-    await setLoader('path', r'\Windows\System32\winload.efi');
-    await setLoader('systemroot', r'\Windows');
-    await setLoader('detecthal', 'Yes');
-    await setLoader('nx', 'OptIn');
-    await setLoader('testsigning', 'on');
-    await setLoader('nointegritychecks', 'on');
-    await setLoader('recoveryenabled', 'No');
-    await _run('bcdedit', ['/store', store, '/default', guid], '既定エントリの設定');
-    await _run(
-        'bcdedit',
-        ['/store', store, '/set', '{bootmgr}', 'displayorder', guid],
-        '表示順の設定');
-    await _run(
-        'bcdedit',
-        ['/store', store, '/set', '{bootmgr}', 'default', guid],
-        'bootmgr 既定の設定');
+    try {
+      // まず対象イメージをソースに bcdboot。ホストの bcdboot が対象の
+      // アーキテクチャを扱えない環境（ARM64 ソースで exit 193 等）では、
+      // ホスト Windows をテンプレートにして生成し、後段で ARM64 の
+      // bootmgfw に差し替えて向きを直す（実機で実証した手順）。
+      var bcdboot = await runner.run('bcdboot', [
+        _join(_winRoot, ['Windows']),
+        '/s',
+        _espRoot,
+        '/f',
+        'UEFI'
+      ]);
+      if (!bcdboot.ok) {
+        onStep(WinInstallStep.buildBcd,
+            '対象イメージからの bcdboot が失敗したため、ホスト Windows をテンプレートに再試行します');
+        final hostWin = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+        bcdboot = await runner
+            .run('bcdboot', [hostWin, '/s', _espRoot, '/f', 'UEFI']);
+        if (!bcdboot.ok) {
+          // bcdboot の診断は stdout に出ることが多いため stderr 優先で拾う。
+          final detail = bcdboot.stderrText.isEmpty
+              ? bcdboot.stdoutText
+              : bcdboot.stderrText;
+          throw StateError('bcdboot が失敗しました: $detail');
+        }
+      }
+      // ブートファイルは常に対象イメージ（ARM64）のものへ差し替える。
+      await bootDir.create(recursive: true);
+      await bootmgfw.copy(_join(msBootDir.path, ['bootmgfw.efi']));
+      await bootmgfw.copy(_join(bootDir.path, ['bootaa64.efi']));
+      Future<void> setEntry(String id, String name, String value) => _run(
+            'bcdedit',
+            ['/store', store, '/set', id, name, value],
+            'BCD 設定 ($name)',
+          );
+      await setEntry('{bootmgr}', 'device', 'partition=$espPart');
+      await setEntry('{default}', 'device', 'partition=$winPart');
+      await setEntry('{default}', 'osdevice', 'partition=$winPart');
+      await setEntry('{default}', 'path', r'\Windows\System32\winload.efi');
+      await setEntry('{default}', 'systemroot', r'\Windows');
+      await setEntry('{default}', 'detecthal', 'Yes');
+      await setEntry('{default}', 'nx', 'OptIn');
+      await setEntry('{default}', 'testsigning', 'on');
+      await setEntry('{default}', 'nointegritychecks', 'on');
+      await setEntry('{default}', 'recoveryenabled', 'No');
+      await setEntry('{default}', 'bootstatuspolicy', 'IgnoreAllFailures');
+    } catch (_) {
+      // 構築のどこかで失敗したら、退避した旧 BCD を正規パスへ戻す。
+      // 旧 BCD を退避したまま失敗すると ESP が起動不能になるため（H3）。
+      if (storeBackup != null) {
+        final partial = File(store);
+        if (await partial.exists()) await partial.delete();
+        await File(storeBackup).rename(store);
+        onStep(WinInstallStep.buildBcd, 'BCD 構築に失敗したため、退避した旧 BCD を復元しました');
+      }
+      rethrow;
+    }
 
-    // 5. ドライバー注入（任意）＋ qci2c の Start=4 再適用。
+    // 5. ドライバー注入（任意）。
     if (driverPackDir == null) {
       onStep(WinInstallStep.injectDrivers, 'ドライバー注入はスキップしました');
     } else {
@@ -229,46 +240,29 @@ class WindowsInstallWizard {
         ],
         'ドライバーの注入',
       );
-      // 全量 DISM は qci2c の Start を 3 に戻すため、オフラインで 4 に直す。
-      const hiveKey = r'HKLM\WOA_OFF';
-      await _run(
-          'reg',
-          [
-            'load',
-            hiveKey,
-            _join(_winRoot, ['Windows', 'System32', 'config', 'SYSTEM']),
-          ],
-          'SYSTEM ハイブのロード');
-      try {
-        final query = await runner.run('reg',
-            ['query', '$hiveKey\\ControlSet001\\Services\\qci2c', '/v', 'Start']);
-        if (query.ok) {
-          await _run(
-              'reg',
-              [
-                'add',
-                '$hiveKey\\ControlSet001\\Services\\qci2c',
-                '/v',
-                'Start',
-                '/t',
-                'REG_DWORD',
-                '/d',
-                '4',
-                '/f',
-              ],
-              'qci2c の Start 修正');
-          onStep(WinInstallStep.injectDrivers,
-              'qci2c の Start を 4 に戻しました（WHEA 対策）');
-        } else {
-          onStep(WinInstallStep.injectDrivers,
-              '警告: qci2c サービスが見つかりませんでした（未注入の可能性）');
-        }
-      } finally {
-        await runner.run('reg', ['unload', hiveKey]);
-      }
     }
 
-    // 6. unattend.xml 配置（任意）。
+    // 6. 既知問題のオフライン修復（DESIGN §12 ライブラリの
+    // インストール時サブセット。全量 DISM が qci2c の Start を戻す問題や
+    // DISM 展開直後の GeneralizationState=6 をここで潰す。
+    // OOBE 完了扱いは新規インストールには適用しない）。
+    onStep(WinInstallStep.offlineFixes, '既知問題をチェックしています');
+    final troubleshooter = Troubleshooter(
+      runner: runner,
+      winDir: winDir,
+      espDir: espDir,
+      hostIsWindows: hostIsWindows,
+    );
+    await troubleshooter.applyFixes(
+      {
+        IssueId.generalizationState,
+        IssueId.qcTreeStart,
+        IssueId.qci2cStart,
+      },
+      onProgress: (m) => onStep(WinInstallStep.offlineFixes, m),
+    );
+
+    // 7. unattend.xml 配置（任意）。
     if (unattendPath == null) {
       onStep(WinInstallStep.placeUnattend, 'unattend 配置はスキップしました');
     } else {
@@ -278,7 +272,7 @@ class WindowsInstallWizard {
       await File(unattendPath!).copy(_join(panther.path, ['unattend.xml']));
     }
 
-    // 7. 検証。
+    // 8. 検証。
     onStep(WinInstallStep.verify, '成果物を検証しています');
     final missing = <String>[];
     if (!await File(_join(_winRoot, ['Windows', 'System32', 'winload.efi']))
@@ -293,8 +287,7 @@ class WindowsInstallWizard {
       throw StateError('検証に失敗しました: ${missing.join(', ')} がありません');
     }
 
-    // 8. 完了。
-    onStep(WinInstallStep.done,
-        '完了しました。UEFI で起動して初回セットアップを確認してください');
+    // 9. 完了。
+    onStep(WinInstallStep.done, '完了しました。UEFI で起動して初回セットアップを確認してください');
   }
 }

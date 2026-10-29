@@ -189,3 +189,22 @@ v1 の範囲は大きいため、以下の順で段階的に作る（各フェ�
   5. ドライバー注入（任意）: ドライバーパックの INF をオフライン DISM で投入し、qci2c の Start=4 を再適用する（全量 DISM がリセットするため）
   6. unattend.xml の配置（任意）と完了確認
   - Windows 専用機能として実装し（DISM 依存）、Linux では前提検証で「未対応」と表示して止める。
+
+## 12. トラブルシューティング／既知問題の自動修復（2026-10-29 ユーザー指示で追加）
+
+実機導入で実際に踏んだ不具合を「検出 → 修復」のライブラリとして持ち、Gadget（Mass Storage）で見えている win / esp ボリュームに対してオフラインで適用する。単独の「トラブルシューティング」画面と、Windows インストールウィザードの仕上げステップの両方から同じライブラリを使う。
+
+- **診断（常に読み取り専用）**: SYSTEM / SOFTWARE ハイブの状態値、Panther ログ（setupact / setuperr、UnattendGC の windeploy ログ）、System.evtx の BugCheck、C:\ft3680.log の有無と転送方式（SPB / ビットバン）を読み、各既知問題について「該当 / 正常 / 対象外 / 判定不能」を返す。
+- **修復（明示操作でのみ書き込み）**: 画面でチェックした項目だけを適用する。ハイブ編集前にハイブファイルをタイムスタンプ付きでバックアップし、編集後は必ず読み戻して検証する（不一致は失敗として報告）。`reg load` は診断〜修復を通して 1 回だけ行い、`finally` で必ず unload する。
+
+### 既知問題ライブラリ（初期セット）
+
+1. **GENERALIZATION_STATE_6**: `SYSTEM\Setup\Status\SysprepStatus` の GeneralizationState=6。windeploy が「system is in an invalid state (0x8007000D)」で失敗し「インストールを完了できませんでした」になる（実機で 2 回発生）。修復: GeneralizationState=7、CleanupState=2。注意: このキーはハイブルート直下であり ControlSet 配下ではない。
+2. **BCD の作り方と bootstatuspolicy**: `bcdedit /createstore` 製のストアは Sysprep の spbcd が「File is not system store (0xC0000098)」と拒否する。ウィザードの BCD 構築は bcdboot 方式に変更する。対象イメージをソースにする bcdboot はホスト環境により失敗する（ARM64 ソースで exit 193）ため、その場合はホスト Windows をテンプレートに生成し、bootmgfw.efi / bootaa64.efi を対象イメージの ARM64 版に差し替えて {default} の device / osdevice を向け直す。あわせて bootstatuspolicy=IgnoreAllFailures と recoveryenabled=No を保証する（テンプレート既定の DisplayAllFailures では初回ブートの失敗で WinRE に落ちる）。既存インストール向けに「BCD 再構築」を単独修復としても提供する。
+3. **OOBE 未完了**: SystemSetupInProgress=1 かつ `Setup\Status\ChildCompletion` の setup.exe≠3。「予期せず再起動しました」ダイアログのループになる。修復: setup.exe=3、SystemSetupInProgress=0、SetupType=0、CmdLine="" 。ローカルアカウントが未作成のままの可能性があるため、その旨を警告として表示する。
+4. **QcTrEE ブート開始**: QcTrEE の Start=0。spacewar では TGCM が素の RAM を指すため早期ブートで落ち、イベントログも残らない。修復: Start=4。
+5. **qci2c の Start**: Start≠4 は WHEA 0x124 のリスク（共有 SE への無条件アクセス）。修復: Start=4（従来ウィザード内にあった処理をライブラリへ移行）。
+6. **QSM の ConfigFlags**: 初回ブート後のイメージ向け。Enum に QSM デバイスが存在し ConfigFlags≠1 の場合、サブシステム起動時の電源レール再計算でタッチ電源が落ちる。修復: finalize_config 相当（QSM=1、ADSP / AMSS / NSP0=0）。Enum が無い（未ブート）場合は「対象外」とする。
+7. **診断のみの項目**: 直近の BugCheck コード（System.evtx）、ft3680.log からのドライバ状態、Panther ログの最終エラー抜粋。修復は持たず、次の一手の判断材料として提示する。
+
+GPT ヘッダーの異常（sideload による PartitionEntryLBA の書き換え等）は GPT 側の安全設計の管轄とし、本節では検出結果の表示だけ連携する。
